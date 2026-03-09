@@ -5,12 +5,15 @@ class Config:
 
     SECRET_KEY = os.environ.get("SECRET_KEY", "super-secret-key")
 
-    DATABASE_URL = os.environ.get("DATABASE_URL")
+    database_url = os.environ.get("DATABASE_URL")
 
-    if DATABASE_URL and DATABASE_URL.startswith("postgres://"):
-        DATABASE_URL = DATABASE_URL.replace("postgres://", "postgresql://", 1)
+    if database_url:
+        database_url = database_url.replace("postgres://", "postgresql://")
 
-    SQLALCHEMY_DATABASE_URI = DATABASE_URL or "sqlite:////tmp/inventory.db"
+    if not database_url:
+        database_url = "sqlite:////tmp/inventory.db"
+
+    SQLALCHEMY_DATABASE_URI = database_url
 
     SQLALCHEMY_TRACK_MODIFICATIONS = False
 
