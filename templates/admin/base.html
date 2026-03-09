@@ -1,0 +1,70 @@
+{% extends "common/base.html" %}
+
+{% block sidebar %}
+
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+
+<div class="list-group">
+
+    <!-- Dashboard -->
+    <a href="{{ url_for('admin_dashboard') }}"
+       class="nav-link {% if request.endpoint == 'admin_dashboard' %}active{% endif %}">
+        <i class="bi bi-speedometer2"></i> Dashboard
+    </a>
+
+    <!-- Sales Overview -->
+    <a href="{{ url_for('admin_sales_page') }}"
+       class="nav-link {% if request.endpoint == 'admin_sales_page' %}active{% endif %}">
+        <i class="bi bi-currency-rupee"></i> Sales Overview
+    </a>
+
+    <!-- Student Orders -->
+    <a href="{{ url_for('admin_student_orders_page') }}"
+       class="nav-link {% if request.endpoint == 'admin_student_orders_page' %}active{% endif %}">
+        <i class="bi bi-receipt"></i> Student Orders
+    </a>
+
+    <!-- Schools -->
+    <a href="{{ url_for('manage_schools_page') }}"
+       class="nav-link {% if request.endpoint == 'manage_schools_page' %}active{% endif %}">
+        <i class="bi bi-building"></i> Schools
+    </a>
+
+    <!-- Sellers -->
+    <a href="{{ url_for('manage_sellers_page') }}"
+       class="nav-link {% if request.endpoint == 'manage_sellers_page' %}active{% endif %}">
+        <i class="bi bi-briefcase"></i> Sellers
+    </a>
+
+    <!-- Products -->
+    <a href="{{ url_for('manage_products_page') }}"
+       class="nav-link {% if request.endpoint == 'manage_products_page' %}active{% endif %}">
+        <i class="bi bi-box"></i> Products
+    </a>
+
+    <!-- Inventory Tracking -->
+    <a href="{{ url_for('inventory_tracking_page') }}"
+       class="nav-link {% if request.endpoint == 'inventory_tracking_page' %}active{% endif %}">
+        <i class="bi bi-graph-up"></i> Inventory Tracking
+    </a>
+
+    <!-- Dispatch Control -->
+    <a href="{{ url_for('dispatch_control_page') }}"
+       class="nav-link {% if request.endpoint == 'dispatch_control_page' %}active{% endif %}">
+        <i class="bi bi-send"></i> Dispatch Control
+    </a>
+
+    <!-- Low Stock Alerts -->
+    <a href="{{ url_for('admin_low_stock_page') }}"
+       class="nav-link {% if request.endpoint == 'admin_low_stock_page' %}active{% endif %}">
+        <i class="bi bi-exclamation-triangle"></i> Low Stock Alerts
+    </a>
+
+    <!-- Analytics Dashboard -->
+    <a href="{{ url_for('admin_analytics_page') }}"
+       class="nav-link {% if request.endpoint == 'admin_analytics_page' %}active{% endif %}">
+        <i class="bi bi-bar-chart-line"></i> Analytics
+    </a>
+
+</div>
+{% endblock %}

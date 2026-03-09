@@ -1,0 +1,87 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Inventory Tracking{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5><i class="bi bi-graph-up"></i> Inventory Overview</h5>
+        <div class="btn-group">
+            <a href="{{ url_for('manage_schools_page') }}" class="btn btn-sm btn-outline-secondary">Schools</a>
+            <a href="{{ url_for('manage_sellers_page') }}" class="btn btn-sm btn-outline-secondary">Sellers</a>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="row g-4 mb-4">
+            <div class="col-md-3">
+                <div class="card bg-light">
+                    <div class="card-body text-center">
+                        <h6>Total Sellers</h6>
+                        <h3 class="mb-0">{{ stats.total_sellers }}</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-light">
+                    <div class="card-body text-center">
+                        <h6>Pending Dispatches</h6>
+                        <h3 class="mb-0">{{ stats.pending_dispatches }}</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-light">
+                    <div class="card-body text-center">
+                        <h6>On the Way</h6>
+                        <h3 class="mb-0">{{ stats.on_the_way }}</h3>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-3">
+                <div class="card bg-light">
+                    <div class="card-body text-center">
+                        <h6>Delivered</h6>
+                        <h3 class="mb-0">{{ stats.delivered }}</h3>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <h6>Seller Inventory Summary</h6>
+        <div class="table-responsive">
+            <table class="table table-striped">
+                <thead>
+                    <tr>
+                        <th>Seller</th>
+                        <th>Total Allocated</th>
+                        <th>Sent</th>
+                        <th>Remaining</th>
+                        <th>Utilization</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for item in inventory_summary %}
+                    <tr>
+                        <td>{{ item.seller.name }}</td>
+                        <td>{{ item.total_stock }}</td>
+                        <td>{{ item.allocated }}</td>
+                        <td>{{ item.remaining }}</td>
+                        <td>
+                            <div class="progress" style="height: 12px;">
+                                <div class="progress-bar" role="progressbar"
+                                     style="width: {{ (item.allocated/item.total_stock*100) if item.total_stock > 0 else 0 }}%;"
+                                     aria-valuenow="{{ (item.allocated/item.total_stock*100) if item.total_stock > 0 else 0 }}"
+                                     aria-valuemin="0" aria-valuemax="100">
+                                </div>
+                            </div>
+                        </td>
+                    </tr>
+                    {% else %}
+                    <tr><td colspan="5" class="text-center text-muted">No sellers found</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

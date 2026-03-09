@@ -1,0 +1,257 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Dispatch Control{% endblock %}
+
+{% block content %}
+
+<div class="card shadow-sm">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5><i class="bi bi-send"></i> Dispatch Instructions</h5>
+
+        <div>
+            <button class="btn btn-success me-2" data-bs-toggle="modal" data-bs-target="#allocateStockModal">
+                <i class="bi bi-box-arrow-in-down"></i> Allocate Stock
+            </button>
+
+            <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#createDispatchModal">
+                <i class="bi bi-plus"></i> Create Instruction
+            </button>
+        </div>
+    </div>
+
+    <div class="card-body">
+
+        <h6 class="mb-3">Dispatch Instructions</h6>
+
+        {% if instructions %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>ID</th>
+                        <th>Seller</th>
+                        <th>School</th>
+                        <th>Product</th>
+                        <th>Size</th>
+                        <th>Category</th>
+                        <th>Qty</th>
+                        <th>Status</th>
+                        <th>Created</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for i in instructions %}
+                    <tr>
+                        <td>#{{ i.id }}</td>
+                        <td>{{ i.seller.name }}</td>
+                        <td>{{ i.school.name }}</td>
+                        <td>{{ i.product.name }} ({{ i.product.sku }})</td>
+                        <td>{{ i.size.size }}</td>
+                        <td>{{ i.category|title }}</td>
+                        <td>{{ i.quantity }}</td>
+                        <td>
+                            <span class="badge bg-{% if i.status == 'PENDING' %}warning{% elif i.status == 'SENT' %}info{% else %}success{% endif %}">
+                                {{ i.status }}
+                            </span>
+                        </td>
+                        <td>{{ i.created_at.strftime('%d %b %Y %H:%M') }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="alert alert-info text-center py-4">
+            <i class="bi bi-file-earmark-text"></i>
+            <h5>No dispatch instructions yet</h5>
+        </div>
+        {% endif %}
+
+    </div>
+</div>
+
+<!-- ================= ALLOCATE STOCK MODAL ================= -->
+
+<div class="modal fade" id="allocateStockModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Allocate Stock to Seller</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+
+            <form method="POST" action="{{ url_for('allocate_stock_web') }}">
+                <div class="modal-body">
+
+                    <div class="mb-3">
+                        <label class="form-label">Seller *</label>
+                        <select name="seller_id" class="form-select" required>
+                            {% for seller in sellers %}
+                            <option value="{{ seller.id }}">{{ seller.name }}</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Product *</label>
+                        <select name="product_id" class="form-select" required>
+                            {% for product in products %}
+                            <option value="{{ product.id }}">
+                                {{ product.name }} ({{ product.sku }})
+                            </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Quantity *</label>
+                        <input type="number" name="quantity" class="form-control" min="1" required>
+                    </div>
+
+                </div>
+
+                <div class="modal-footer">
+                    <button type="submit" class="btn btn-success">Allocate</button>
+                </div>
+            </form>
+
+        </div>
+    </div>
+</div>
+
+<!-- ================= CREATE DISPATCH MODAL ================= -->
+
+<!-- ================= CREATE DISPATCH MODAL ================= -->
+
+<div class="modal fade" id="createDispatchModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Create Dispatch Instruction</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+
+            <form method="POST" action="{{ url_for('create_dispatch_web') }}">
+                <div class="modal-body">
+
+                    <div class="row">
+
+                        <!-- Seller -->
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Seller *</label>
+                            <select name="seller_id" class="form-select" required>
+                                {% for seller in sellers %}
+                                <option value="{{ seller.id }}">{{ seller.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <!-- Schools with Checkbox -->
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Schools *</label>
+
+                            <div class="border rounded p-2" style="max-height: 200px; overflow-y: auto;">
+
+                                <!-- Select All -->
+                                <div class="form-check mb-2">
+                                    <input class="form-check-input"
+                                           type="checkbox"
+                                           id="selectAllSchools">
+                                    <label class="form-check-label fw-bold"
+                                           for="selectAllSchools">
+                                        Select All
+                                    </label>
+                                </div>
+
+                                <hr class="my-2">
+
+                                {% for school in schools %}
+                                <div class="form-check">
+                                    <input class="form-check-input school-checkbox"
+                                           type="checkbox"
+                                           name="school_ids"
+                                           value="{{ school.id }}"
+                                           id="school{{ school.id }}">
+                                    <label class="form-check-label"
+                                           for="school{{ school.id }}">
+                                        {{ school.name }}
+                                    </label>
+                                </div>
+                                {% endfor %}
+
+                            </div>
+                        </div>
+
+                        <!-- Product -->
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Product *</label>
+                            <select name="product_id" class="form-select" required>
+                                {% for product in products %}
+                                <option value="{{ product.id }}">
+                                    {{ product.name }} ({{ product.sku }})
+                                </option>
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <!-- Size -->
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Size *</label>
+                            <select name="size_id" class="form-select" required>
+                                {% for product in products %}
+                                    {% for size in product.sizes %}
+                                    <option value="{{ size.id }}">
+                                        {{ product.name }} - {{ size.size }}
+                                        ({{ size.quantity }} available)
+                                    </option>
+                                    {% endfor %}
+                                {% endfor %}
+                            </select>
+                        </div>
+
+                        <!-- Category -->
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Category *</label>
+                            <select name="category" class="form-select" required>
+                                <option value="student">Student</option>
+                                <option value="staff">Staff</option>
+                            </select>
+                        </div>
+
+                        <!-- Quantity -->
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Quantity *</label>
+                            <input type="number"
+                                   name="quantity"
+                                   class="form-control"
+                                   min="1"
+                                   required>
+                        </div>
+
+                    </div>
+
+                </div>
+
+                <div class="modal-footer">
+                    <button type="submit"
+                            class="btn btn-primary">
+                        Create Instruction
+                    </button>
+                </div>
+
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+document.getElementById('selectAllSchools').addEventListener('change', function () {
+
+    const checkboxes = document.querySelectorAll('.school-checkbox');
+
+    checkboxes.forEach(cb => {
+        cb.checked = this.checked;
+    });
+});
+</script>
+{% endblock %}

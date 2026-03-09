@@ -1,0 +1,81 @@
+{% extends "admin/base.html" %}
+{% block title %}Executive Dashboard{% endblock %}
+
+{% block content %}
+
+<h3 class="mb-4 fw-bold">Executive Financial Dashboard</h3>
+
+<!-- TOP KPI ROW -->
+<div class="row mb-4">
+
+    <div class="col-md-3">
+        <div class="card shadow-sm p-3 text-center bg-dark text-white">
+            <h6>Total Revenue</h6>
+            <h2>₹{{ total_revenue }}</h2>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card shadow-sm p-3 text-center">
+            <h6>Student Revenue</h6>
+            <h4 class="text-success">₹{{ total_student_revenue }}</h4>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card shadow-sm p-3 text-center">
+            <h6>Staff Revenue</h6>
+            <h4 class="text-primary">₹{{ total_staff_revenue }}</h4>
+        </div>
+    </div>
+
+    <div class="col-md-3">
+        <div class="card shadow-sm p-3 text-center">
+            <h6>Platform Profit</h6>
+            <h4 class="text-danger">₹{{ platform_profit_total }}</h4>
+        </div>
+    </div>
+
+</div>
+
+<!-- COMMISSION BREAKDOWN -->
+<div class="card shadow-sm p-4 mb-4">
+    <h5>Commission Paid to Schools</h5>
+    <h3 class="text-warning">₹{{ total_commission_paid }}</h3>
+</div>
+
+<!-- SCHOOL FINANCIAL TABLE -->
+<div class="card shadow-sm p-4">
+
+    <h5 class="mb-3">School-wise Financial Breakdown</h5>
+
+    <div class="table-responsive">
+        <table class="table table-bordered align-middle">
+            <thead class="table-dark">
+                <tr>
+                    <th>School</th>
+                    <th>Student Revenue</th>
+                    <th>Staff Revenue</th>
+                    <th>Total Revenue</th>
+                    <th>Commission</th>
+                    <th>Platform Profit</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for row in school_financials %}
+                <tr>
+                    <td>{{ row.school }}</td>
+                    <td class="text-success">₹{{ row.student_revenue }}</td>
+                    <td class="text-primary">₹{{ row.staff_revenue }}</td>
+                    <td class="fw-bold">₹{{ row.total_revenue }}</td>
+                    <td class="text-warning">₹{{ row.commission }}</td>
+                    <td class="text-danger fw-bold">₹{{ row.profit }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+    </div>
+
+</div>
+
+{% endblock %}

@@ -1,0 +1,55 @@
+{% extends "common/base.html" %}
+
+{% block sidebar %}
+<div class="list-group">
+
+    <!-- Dashboard -->
+    <a href="{{ url_for('school_dashboard') }}"
+       class="nav-link {% if request.endpoint == 'school_dashboard' %}active{% endif %}">
+        <i class="bi bi-speedometer2"></i> Dashboard
+    </a>
+
+    <!-- Shipments -->
+    <a href="{{ url_for('school_shipments_page') }}"
+       class="nav-link {% if request.endpoint == 'school_shipments_page' %}active{% endif %}">
+        <i class="bi bi-truck"></i> Shipments
+    </a>
+
+    <!-- Student Store -->
+    <a href="{{ url_for('school_student_products_page') }}"
+       class="nav-link {% if request.endpoint == 'school_student_products_page' %}active{% endif %}">
+        <i class="bi bi-bag"></i> Student Store
+    </a>
+
+    <!-- Student Orders -->
+    <a href="{{ url_for('school_student_orders_page') }}"
+       class="nav-link {% if request.endpoint == 'school_student_orders_page' %}active{% endif %}">
+        <i class="bi bi-receipt"></i> Student Orders
+    </a>
+
+    <!-- Staff Store -->
+    <a href="{{ url_for('school_staff_orders_page') }}"
+       class="nav-link {% if request.endpoint == 'school_staff_orders_page' %}active{% endif %}">
+        <i class="bi bi-person-workspace"></i> Staff Store
+    </a>
+
+    <!-- Inventory -->
+    <a href="{{ url_for('school_inventory_page') }}"
+       class="nav-link {% if request.endpoint == 'school_inventory_page' %}active{% endif %}">
+        <i class="bi bi-box-seam"></i> Inventory
+    </a>
+
+    <!-- Sales Summary -->
+    <a href="{{ url_for('school_sales_page') }}"
+       class="nav-link {% if request.endpoint == 'school_sales_page' %}active{% endif %}">
+        <i class="bi bi-currency-rupee"></i> Sales Summary
+    </a>
+
+    <!-- Low Stock -->
+    <a href="{{ url_for('school_low_stock_page') }}"
+       class="nav-link {% if request.endpoint == 'school_low_stock_page' %}active{% endif %}">
+        <i class="bi bi-exclamation-triangle"></i> Low Stock
+    </a>
+
+</div>
+{% endblock %}

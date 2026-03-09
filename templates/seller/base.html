@@ -1,0 +1,32 @@
+{% extends "common/base.html" %}
+
+{% block sidebar %}
+<div class="list-group">
+
+    <a href="{{ url_for('seller_dashboard') }}"
+       class="nav-link {% if request.endpoint == 'seller_dashboard' %}active{% endif %}">
+        <i class="bi bi-speedometer2"></i> Dashboard
+    </a>
+
+    <a href="{{ url_for('seller_inventory_page') }}"
+       class="nav-link {% if request.endpoint == 'seller_inventory_page' %}active{% endif %}">
+        <i class="bi bi-archive"></i> Inventory
+    </a>
+
+    <a href="{{ url_for('seller_assigned_dispatches_page') }}"
+       class="nav-link {% if request.endpoint == 'seller_assigned_dispatches_page' %}active{% endif %}">
+        <i class="bi bi-list-check"></i> Dispatch Instructions
+    </a>
+
+    <a href="{{ url_for('seller_send_stock') }}"
+        class="nav-link">
+        <i class="bi bi-box-arrow-right"></i> Send Stock
+    </a>
+
+    <a href="{{ url_for('seller_dispatch_history_page') }}"
+       class="nav-link {% if request.endpoint == 'seller_dispatch_history_page' %}active{% endif %}">
+        <i class="bi bi-truck"></i> Dispatch History
+    </a>
+
+</div>
+{% endblock %}

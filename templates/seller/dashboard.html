@@ -1,0 +1,80 @@
+{% extends "seller/base.html" %}
+
+{% block title %}Seller Dashboard{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-white bg-primary">
+            <div class="card-body">
+                <h5 class="card-title">Total Allocated</h5>
+                <p class="card-text display-4">{{ stats.total_allocated }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-success">
+            <div class="card-body">
+                <h5 class="card-title">Sent</h5>
+                <p class="card-text display-4">{{ stats.total_sent }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-warning">
+            <div class="card-body">
+                <h5 class="card-title">Remaining</h5>
+                <p class="card-text display-4">{{ stats.total_remaining }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-info">
+            <div class="card-body">
+                <h5 class="card-title">Pending Instructions</h5>
+                <p class="card-text display-4">{{ pending_instructions }}</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h5><i class="bi bi-truck"></i> Recent Shipments</h5>
+    </div>
+    <div class="card-body">
+        {% if recent_shipments %}
+        <table class="table table-hover">
+            <thead>
+                <tr>
+                    <th>ID</th>
+                    <th>School</th>
+                    <th>Product</th>
+                    <th>Qty</th>
+                    <th>Status</th>
+                    <th>Date</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for s in recent_shipments %}
+                <tr>
+                    <td>#{{ s.id }}</td>
+                    <td>{{ s.to_school.name }}</td>
+                    <td>{{ s.items[0].product.name }}</td>
+                    <td>{{ s.items|sum(attribute='quantity') }}</td>
+                    <td>
+                        <span class="badge status-{{ s.status.value.replace('_', '-') }}">
+                            {{ s.status.value.replace('_', ' ').title() }}
+                        </span>
+                    </td>
+                    <td>{{ s.created_at.strftime('%d %b %H:%M') }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="text-center py-4 text-muted">No shipments yet</div>
+        {% endif %}
+    </div>
+</div>
+{% endblock %}

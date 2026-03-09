@@ -1,0 +1,304 @@
+{% extends "school/base.html" %}
+{% block title %}Staff Store{% endblock %}
+{% block content %}
+
+<div class="container-fluid py-4">
+
+    <!-- HEADER -->
+    <div class="d-flex justify-content-between align-items-center mb-4">
+        <div>
+            <h3 class="fw-bold mb-1">Staff Store</h3>
+            <small class="text-muted">Order products for staff members</small>
+        </div>
+        <div class="balance-box px-4 py-2 rounded-3 shadow-sm">
+            <small class="text-muted">Available Balance</small>
+            <div class="fw-bold fs-5 text-success">
+                ₹{{ school.coin_balance|round(2) if school else 0 }}
+            </div>
+        </div>
+    </div>
+
+    <div class="row">
+
+        <!-- ================= PRODUCT GRID ================= -->
+        <div class="col-lg-8">
+            <div class="row g-4">
+
+                {% set grouped_products = staff_inventory | groupby('product_id') %}
+
+                {% for product_id, items in grouped_products %}
+                {% set first_item = items[0] %}
+
+                <div class="col-md-4">
+                    <div class="product-card"
+                         data-id="{{ first_item.product.id }}"
+                         data-price="{{ first_item.product.unit_price }}">
+
+                        <div class="product-image">
+                            {% if first_item.product.images %}
+                                <img src="{{ first_item.product.images[0].image_url }}" class="img-fluid">
+                            {% else %}
+                                <div class="placeholder">No Image</div>
+                            {% endif %}
+                        </div>
+
+                        <div class="product-body">
+                            <h6 class="product-title">
+                                {{ first_item.product.name }}
+                            </h6>
+
+                            <div class="product-price">
+                                ₹{{ first_item.product.unit_price }}
+                            </div>
+
+                            <div class="mt-2">
+                                <label class="form-label small">Select Size</label>
+                                <select class="form-select size-select">
+                                    <option value="">Choose size</option>
+                                    {% for inv in items %}
+                                        <option value="{{ inv.size_id }}"
+                                                data-stock="{{ inv.quantity }}"
+                                                {% if inv.quantity == 0 %}disabled{% endif %}>
+                                            {{ inv.size.size }}
+                                            {% if inv.quantity > 0 %}
+                                                ({{ inv.quantity }} available)
+                                            {% else %}
+                                                (Out of Stock)
+                                            {% endif %}
+                                        </option>
+                                    {% endfor %}
+                                </select>
+                            </div>
+
+                        </div>
+                    </div>
+                </div>
+
+                {% endfor %}
+
+            </div>
+        </div>
+
+        <!-- ================= CHECKOUT PANEL ================= -->
+        <div class="col-lg-4">
+            <div class="checkout-card shadow-sm">
+
+                <form method="POST" action="{{ url_for('school_staff_purchase') }}">
+                    <input type="hidden" name="category" value="staff">
+                    <input type="hidden" name="product_id" id="selected-product">
+                    <input type="hidden" name="size_id" id="selected-size">
+
+                    <h5 class="mb-3 fw-semibold">Order Summary</h5>
+
+                    <div class="summary-box mb-3">
+
+                        <div class="d-flex justify-content-between">
+                            <span>Product</span>
+                            <span id="summary-product">None</span>
+                        </div>
+
+                        <div class="d-flex justify-content-between mt-2">
+                            <span>Size</span>
+                            <span id="summary-size">None</span>
+                        </div>
+
+                        <div class="d-flex justify-content-between mt-2">
+                            <span>Unit Price</span>
+                            <span id="unit-price">₹0.00</span>
+                        </div>
+
+                        <div class="mt-3">
+                            <label class="form-label">Quantity</label>
+                            <input type="number"
+                                   name="quantity"
+                                   min="1"
+                                   class="form-control"
+                                   required>
+                        </div>
+
+                        <div class="d-flex justify-content-between mt-3 fw-bold fs-5">
+                            <span>Total</span>
+                            <span class="text-success" id="total-cost">₹0.00</span>
+                        </div>
+
+                        <small class="text-muted d-block mt-2">
+                            Stock: <span id="available-stock">0</span>
+                        </small>
+
+                    </div>
+
+                    <!-- ================= PAYMENT OPTIONS ================= -->
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Payment</label>
+                        <div class="payment-toggle">
+                            <input type="radio" name="payment_method" value="coins" id="coins" checked>
+                            <label for="coins">Balance</label>
+
+                            <input type="radio" name="payment_method" value="razorpay" id="razorpay">
+                            <label for="razorpay">Online</label>
+                        </div>
+                    </div>
+
+                    <button type="submit" class="btn btn-dark w-100 py-3">
+                        Place Order
+                    </button>
+
+                </form>
+            </div>
+        </div>
+
+    </div>
+</div>
+
+<!-- ================= ORDER HISTORY ================= -->
+<hr class="my-5">
+<h4 class="mb-4 fw-bold">Staff Order History</h4>
+
+{% if staff_orders %}
+<div class="table-responsive">
+    <table class="table table-striped table-hover align-middle">
+        <thead class="table-dark">
+            <tr>
+                <th>Order ID</th>
+                <th>Date</th>
+                <th>Status</th>
+                <th>Products</th>
+                <th>Total Qty</th>
+                <th>Total Amount</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for order in staff_orders %}
+            <tr>
+                <td>#{{ order.id }}</td>
+                <td>
+                    {{ order.created_at.strftime('%d %b %Y') }}<br>
+                    <small>{{ order.created_at.strftime('%H:%M') }}</small>
+                </td>
+                <td>
+                    <span class="badge bg-success">
+                        {{ order.status|title }}
+                    </span>
+                </td>
+                <td>
+                    <ul class="mb-0">
+                        {% for item in order.items %}
+                        <li>
+                            {{ item.product.name }}
+                            ({{ item.size.size }})
+                            × {{ item.quantity }}
+                        </li>
+                        {% endfor %}
+                    </ul>
+                </td>
+                <td>{{ order.items | sum(attribute='quantity') }}</td>
+                <td class="fw-bold text-success">₹{{ order.total_amount }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% else %}
+<div class="text-muted">No staff orders yet.</div>
+{% endif %}
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+
+    const cards = document.querySelectorAll('.product-card');
+    const selectedProductInput = document.getElementById('selected-product');
+    const selectedSizeInput = document.getElementById('selected-size');
+    const quantityInput = document.querySelector('input[name="quantity"]');
+    const unitPriceEl = document.getElementById('unit-price');
+    const totalCostEl = document.getElementById('total-cost');
+    const availableStockEl = document.getElementById('available-stock');
+    const summaryProduct = document.getElementById('summary-product');
+    const summarySize = document.getElementById('summary-size');
+
+    let currentPrice = 0;
+    let currentStock = 0;
+    let activeCard = null;
+
+    cards.forEach(card => {
+        card.addEventListener('click', function(e) {
+
+            if (e.target.tagName === "SELECT") return;
+
+            cards.forEach(c => c.classList.remove('active'));
+            this.classList.add('active');
+
+            activeCard = this;
+
+            selectedProductInput.value = this.dataset.id;
+            currentPrice = parseFloat(this.dataset.price);
+
+            summaryProduct.textContent =
+                this.querySelector('.product-title').innerText;
+
+            unitPriceEl.textContent = '₹' + currentPrice.toFixed(2);
+
+            resetSizeSelection();
+        });
+    });
+
+    document.querySelectorAll('.size-select').forEach(select => {
+
+        select.addEventListener('click', e => e.stopPropagation());
+
+        select.addEventListener('change', function(e){
+
+            if (!activeCard || !activeCard.contains(this)) {
+                this.value = "";
+                return;
+            }
+
+            const selectedOption = this.options[this.selectedIndex];
+
+            const stock = parseInt(selectedOption.dataset.stock);
+
+            // Prevent selecting out of stock
+            if (stock === 0) {
+                alert("This size is out of stock");
+                this.value = "";
+                return;
+            }
+
+            selectedSizeInput.value = this.value;
+            currentStock = stock;
+
+            summarySize.textContent =
+                selectedOption.text.split('(')[0].trim();
+
+            availableStockEl.textContent = currentStock;
+            quantityInput.max = currentStock;
+            quantityInput.value = "";
+
+            updateTotal();
+        });
+    });
+
+    function updateTotal() {
+        const qty = parseInt(quantityInput.value) || 0;
+        totalCostEl.textContent =
+            '₹' + (qty * currentPrice).toFixed(2);
+    }
+
+    quantityInput.addEventListener('input', function() {
+        if (this.value > currentStock) {
+            this.value = currentStock;
+        }
+        updateTotal();
+    });
+
+    function resetSizeSelection() {
+        selectedSizeInput.value = "";
+        summarySize.textContent = "None";
+        availableStockEl.textContent = 0;
+        quantityInput.value = "";
+        totalCostEl.textContent = "₹0.00";
+    }
+
+});
+</script>
+
+{% endblock %}

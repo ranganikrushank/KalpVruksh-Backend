@@ -1,0 +1,197 @@
+{% extends "school/base.html" %}
+{% block title %}Student Orders{% endblock %}
+
+{% block content %}
+
+<div class="card shadow-sm">
+    <div class="card-header">
+        <h5>Student Orders - Pickup Management</h5>
+    </div>
+
+    <div class="card-body">
+
+        {% if orders %}
+
+        <!-- ================= SEARCH & FILTER SECTION ================= -->
+
+        <div class="row mb-3">
+            <div class="col-md-4">
+                <input type="text"
+                       id="searchInput"
+                       class="form-control"
+                       placeholder="Search by Order ID / Token / Student">
+            </div>
+
+            <div class="col-md-2">
+                <select id="statusFilter" class="form-select">
+                    <option value="">All Status</option>
+                    <option value="pending">Pending</option>
+                    <option value="completed">Completed</option>
+                </select>
+            </div>
+
+            <div class="col-md-2">
+                <select id="paymentFilter" class="form-select">
+                    <option value="">All Payments</option>
+                    <option value="PAID">Paid</option>
+                    <option value="PENDING">Pending</option>
+                </select>
+            </div>
+        </div>
+
+        <!-- ================= TABLE ================= -->
+
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Order ID</th>
+                        <th>Student</th>
+                        <th>Total</th>
+                        <th>Payment</th>
+                        <th>Token</th>
+                        <th>Status</th>
+                        <th>Created At</th>
+                        <th>Pickup Time</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody id="ordersTable">
+
+                    {% for o in orders %}
+                    <tr>
+                        <td>#{{ o.id }}</td>
+
+                        <td>
+                            {{ o.student.username if o.student else '-' }}
+                        </td>
+
+                        <td>₹{{ o.total_amount }}</td>
+
+                        <td>
+                            {% if o.payment_status == 'PAID' %}
+                                <span class="badge bg-success">PAID</span>
+                            {% else %}
+                                <span class="badge bg-danger">PENDING</span>
+                            {% endif %}
+                        </td>
+
+                        <td>{{ o.confirmation_token or '-' }}</td>
+
+                        <td>
+                            {% if o.status == 'completed' %}
+                                <span class="badge bg-success">Completed</span>
+                            {% else %}
+                                <span class="badge bg-warning text-dark">
+                                    {{ o.status|title }}
+                                </span>
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            {{ o.created_at.strftime('%d %b %Y %H:%M') }}
+                        </td>
+
+                        <td>
+                            {% if o.pickup_confirmed_at %}
+                                {{ o.pickup_confirmed_at.strftime('%d %b %Y %H:%M') }}
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+
+                        <td>
+                            {% if o.status != 'completed' and o.payment_status == 'PAID' %}
+                            <button class="btn btn-sm btn-primary"
+                                    onclick="confirmPickup('{{ o.confirmation_token }}')">
+                                Confirm Pickup
+                            </button>
+                            {% else %}
+                                -
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+
+                </tbody>
+            </table>
+        </div>
+
+        {% else %}
+            <div class="text-muted">No student orders.</div>
+        {% endif %}
+
+    </div>
+</div>
+
+
+<!-- ================= FILTER SCRIPT ================= -->
+
+<script>
+document.getElementById('searchInput').addEventListener('keyup', filterTable);
+document.getElementById('statusFilter').addEventListener('change', filterTable);
+document.getElementById('paymentFilter').addEventListener('change', filterTable);
+
+function filterTable() {
+
+    const searchValue = document.getElementById('searchInput').value.toLowerCase();
+    const statusValue = document.getElementById('statusFilter').value.toLowerCase();
+    const paymentValue = document.getElementById('paymentFilter').value.toUpperCase();
+
+    const rows = document.querySelectorAll("#ordersTable tr");
+
+    rows.forEach(row => {
+
+        const rowText = row.innerText.toLowerCase();
+
+        const paymentBadge = row.querySelectorAll(".badge")[0];
+        const payment = paymentBadge ? paymentBadge.innerText.toUpperCase() : "";
+
+        const statusBadge = row.querySelectorAll(".badge")[1];
+        const status = statusBadge ? statusBadge.innerText.toLowerCase() : "";
+
+        let visible = true;
+
+        if (searchValue && !rowText.includes(searchValue)) {
+            visible = false;
+        }
+
+        if (statusValue && !status.includes(statusValue)) {
+            visible = false;
+        }
+
+        if (paymentValue && payment !== paymentValue) {
+            visible = false;
+        }
+
+        row.style.display = visible ? "" : "none";
+    });
+}
+</script>
+
+
+<!-- ================= PICKUP CONFIRMATION SCRIPT ================= -->
+
+<script>
+function confirmPickup(token) {
+
+    fetch('/api/school/confirm-pickup', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({ confirmation_token: token })
+    })
+    .then(res => res.json())
+    .then(data => {
+        if (data.message) {
+            alert('Pickup confirmed successfully!');
+            location.reload();
+        } else {
+            alert(data.error || 'Error confirming pickup');
+        }
+    });
+}
+</script>
+
+{% endblock %}

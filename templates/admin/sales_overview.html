@@ -1,0 +1,75 @@
+{% extends "admin/base.html" %}
+{% block title %}Sales Overview{% endblock %}
+
+{% block content %}
+
+<div class="card shadow-sm">
+    <div class="card-header">
+        <h5>School Sales Overview</h5>
+    </div>
+
+    <div class="card-body">
+
+        <table class="table table-bordered table-hover" id="schoolSalesTable">
+            <thead class="table-dark">
+                <tr>
+                    <th>School</th>
+                    <th>Student Orders</th>
+                    <th>Staff Orders</th>
+                    <th>Student Revenue</th>
+                    <th>Staff Revenue</th>
+                    <th>Total Revenue</th>
+                </tr>
+            </thead>
+            <tbody>
+            {% if sales_data %}
+                {% for row in sales_data %}
+                <tr>
+                    <td>{{ row.school_name }}</td>
+                    <td>{{ row.student_orders }}</td>
+                    <td>{{ row.staff_orders }}</td>
+                    <td class="text-success">₹{{ row.student_revenue }}</td>
+                    <td class="text-primary">₹{{ row.staff_revenue }}</td>
+                    <td class="fw-bold">₹{{ row.total_revenue }}</td>
+                </tr>
+                {% endfor %}
+            {% else %}
+                <tr>
+                    <td colspan="6" class="text-center text-muted">
+                        No sales data available
+                    </td>
+                </tr>
+            {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<script>
+fetch('/api/admin/chart/school-comparison', {
+    headers: {
+        "Authorization": "Bearer " + localStorage.getItem("access_token")
+    }
+})
+.then(res => res.json())
+.then(data => {
+
+    const tbody = document.querySelector('#schoolSalesTable tbody');
+
+    data.forEach(row => {
+        tbody.innerHTML += `
+            <tr>
+                <td>${row.school}</td>
+                <td>${row.student_orders}</td>
+                <td>${row.staff_orders}</td>
+                <td>₹${row.student_revenue}</td>
+                <td>₹${row.staff_revenue}</td>
+                <td><strong>₹${row.total_revenue}</strong></td>
+            </tr>
+        `;
+    });
+
+});
+</script>
+
+{% endblock %}

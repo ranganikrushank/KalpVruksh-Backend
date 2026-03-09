@@ -1,0 +1,51 @@
+{% extends "admin/base.html" %}
+{% block title %}Student Orders{% endblock %}
+
+{% block content %}
+
+<div class="container-fluid py-4">
+
+    <h3 class="fw-bold mb-4">Student Orders</h3>
+
+    <div class="card shadow-sm">
+        <div class="card-body table-responsive">
+
+            <table class="table table-striped table-hover align-middle">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Order ID</th>
+                        <th>School</th>
+                        <th>Student</th>
+                        <th>Total</th>
+                        <th>Status</th>
+                        <th>Payment</th>
+                        <th>Date</th>
+                    </tr>
+                </thead>
+                <tbody>
+                {% for order in orders %}
+                    <tr>
+                        <td>#{{ order.id }}</td>
+                        <td>{{ order.school.name }}</td>
+                        <td>{{ order.student.username }}</td>
+                        <td class="fw-bold text-success">₹{{ order.total_amount }}</td>
+                        <td>
+                            <span class="badge bg-success">
+                                {{ order.status|title }}
+                            </span>
+                        </td>
+                        <td>{{ order.payment_status }}</td>
+                        <td>
+                            {{ order.created_at.strftime('%d %b %Y') }}
+                        </td>
+                    </tr>
+                {% endfor %}
+                </tbody>
+            </table>
+
+        </div>
+    </div>
+
+</div>
+
+{% endblock %}

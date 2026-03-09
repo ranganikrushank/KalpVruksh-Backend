@@ -1,0 +1,95 @@
+{% extends "school/base.html" %}
+
+{% block title %}Shipment Tracking{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5><i class="bi bi-truck"></i> Incoming Shipments</h5>
+        <button class="btn btn-sm btn-outline-primary" onclick="location.reload()">
+            <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+    </div>
+    <div class="card-body">
+        {% if shipments %}
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead class="table-light">
+                    <tr>
+                        <th>ID</th>
+                        <th>Seller</th>
+                        <th>Category</th>
+                        <th>Product</th>
+                        <th>Qty</th>
+                        <th>Status</th>
+                        <th>Date</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for s in shipments %}
+                    <tr>
+                        <td>#{{ s.id }}</td>
+                        <td>{{ s.from_seller.name }}</td>
+                        <td>{{ s.items[0].category.value|title }}</td>
+                        <td>{{ s.items[0].product.name }}</td>
+                        <td>{{ s.items|sum(attribute='quantity') }}</td>
+                        <td>
+                            <span class="badge status-{{ s.status.value.replace('_', '-') }}">
+                                {{ s.status.value.replace('_', ' ').title() }}
+                            </span>
+                        </td>
+                        <td>{{ s.created_at.strftime('%d %b %H:%M') }}</td>
+                        <td>
+                            {% if s.status.value == 'on_the_way' %}
+                            <button class="btn btn-sm btn-success" 
+                                    onclick="receiveShipment({{ s.id }})">
+                                Receive
+                            </button>
+                            {% elif s.status == 'delivered' %}
+                            <span class="text-success">Received</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="alert alert-info text-center py-5">
+            <i class="bi bi-inbox"></i>
+            <h5>No shipments yet</h5>
+            <p>Wait for sellers to send stock to your school.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+function receiveShipment(shipmentId) {
+
+    if (!confirm('Mark shipment #' + shipmentId + ' as received? This will update inventory.')) {
+        return;
+    }
+
+    fetch(`/school/receive-shipment/${shipmentId}`, {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+
+        if (data.message) {
+            alert('Shipment received successfully!');
+            location.reload();
+        } else {
+            alert('Error: ' + (data.error || 'Unknown error'));
+        }
+
+    })
+    .catch(err => {
+        console.error(err);
+        alert('Network error');
+    });
+}
+</script>
+{% endblock %}

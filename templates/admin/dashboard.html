@@ -1,0 +1,108 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Admin Dashboard{% endblock %}
+
+{% block content %}
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card text-white bg-primary">
+            <div class="card-body">
+                <h5 class="card-title">Schools</h5>
+                <p class="card-text display-4">{{ stats.total_schools }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-success">
+            <div class="card-body">
+                <h5 class="card-title">Sellers</h5>
+                <p class="card-text display-4">{{ stats.total_sellers }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-info">
+            <div class="card-body">
+                <h5 class="card-title">Products</h5>
+                <p class="card-text display-4">{{ stats.total_products }}</p>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card text-white bg-warning">
+            <div class="card-body">
+                <h5 class="card-title">Revenue</h5>
+                <p class="card-text display-4">₹{{ stats.total_revenue|intcomma }}</p>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="row">
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-body">
+                {% if recent_shipments %}
+                <table class="table table-hover">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>Seller</th>
+                            <th>School</th>
+                            <th>Status</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for s in recent_shipments %}
+                        <tr>
+                            <td>#{{ s.id }}</td>
+                            <td>{{ s.from_seller.name }}</td>
+                            <td>{{ s.to_school.name }}</td>
+                            <td>
+                                <span class="badge status-{{ s.status.replace('_', '-') }}">
+                                    {{ s.status.replace('_', ' ').title() }}
+                                </span>
+                            </td>
+                            <td>{{ s.created_at.strftime('%d %b') }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+                {% else %}
+                <div class="text-center py-4 text-muted">No shipments yet</div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card">
+            <div class="card-header">
+                <h5><i class="bi bi-exclamation-circle"></i> Low Stock Alerts</h5>
+            </div>
+            <div class="card-body">
+                {% if low_stock_alerts %}
+                <ul class="list-group">
+                    {% for alert in low_stock_alerts[:5] %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <div>
+                            <strong>{{ alert.product.name }}</strong> at {{ alert.school.name }}
+                            <br>
+                            <small class="text-muted">{{ alert.current_stock }} left (threshold: {{ alert.threshold }})</small>
+                        </div>
+                        <span class="badge bg-warning">Low</span>
+                    </li>
+                    {% endfor %}
+                </ul>
+                {% else %}
+                <div class="text-center py-4 text-success">
+                    <i class="bi bi-check-circle fs-3"></i>
+                    <p class="mt-2">All stock levels are healthy</p>
+                </div>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,140 @@
+{% extends "seller/base.html" %}
+
+{% block title %}Send Stock{% endblock %}
+
+{% block content %}
+
+<div class="card shadow-sm">
+    <div class="card-header">
+        <h5>
+            <i class="bi bi-box-arrow-right"></i> Send Stock To School
+        </h5>
+    </div>
+
+    <div class="card-body">
+
+        {% if inventory %}
+
+        <form method="POST" action="{{ url_for('seller_send_stock') }}">
+
+            <!-- Select School -->
+            <div class="mb-3">
+                <label class="form-label">Select School</label>
+                <select name="school_id" class="form-select" required>
+                    <option value="">-- Choose School --</option>
+                    {% for school in schools %}
+                        <option value="{{ school.id }}">
+                            {{ school.name }}
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Select Product -->
+            <div class="mb-3">
+                <label class="form-label">Select Product</label>
+                <select name="product_id" id="productSelect" 
+                        class="form-select" required onchange="loadSizes()">
+                    <option value="">-- Choose Product --</option>
+                    {% for inv in inventory %}
+                        <option value="{{ inv.product.id }}" 
+                                data-remaining="{{ inv.remaining_stock }}">
+                            {{ inv.product.name }} 
+                            (Remaining: {{ inv.remaining_stock }})
+                        </option>
+                    {% endfor %}
+                </select>
+            </div>
+
+            <!-- Select Size -->
+            <div class="mb-3">
+                <label class="form-label">Select Size</label>
+                <select name="size_id" id="sizeSelect" class="form-select" required>
+                    <option value="">-- Select Product First --</option>
+                </select>
+            </div>
+
+            <!-- Category -->
+            <div class="mb-3">
+                <label class="form-label">Category</label>
+                <select name="category" class="form-select" required>
+                    <option value="student">Student</option>
+                    <option value="staff">Staff</option>
+                </select>
+            </div>
+
+            <!-- Quantity -->
+            <div class="mb-3">
+                <label class="form-label">Quantity</label>
+                <input type="number" 
+                       name="quantity" 
+                       class="form-control" 
+                       min="1" 
+                       required>
+                <div class="form-text text-muted">
+                    Cannot exceed remaining stock.
+                </div>
+            </div>
+
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-truck"></i> Send Shipment
+            </button>
+
+        </form>
+
+        {% else %}
+
+        <div class="alert alert-info text-center">
+            <i class="bi bi-inbox"></i>
+            <h5>No Allocated Inventory</h5>
+            <p>Wait for Admin to allocate stock.</p>
+        </div>
+
+        {% endif %}
+
+    </div>
+</div>
+
+<script>
+
+// Load sizes dynamically
+function loadSizes() {
+
+    const productId = document.getElementById('productSelect').value;
+    const sizeSelect = document.getElementById('sizeSelect');
+
+    if (!productId) {
+        sizeSelect.innerHTML = '<option>-- Select Product First --</option>';
+        return;
+    }
+
+    fetch(`/api/product-sizes/${productId}`)
+        .then(response => response.json())
+        .then(data => {
+
+            sizeSelect.innerHTML = '';
+
+            if (data.length === 0) {
+                sizeSelect.innerHTML = '<option>No sizes available</option>';
+                return;
+            }
+
+            data.forEach(size => {
+
+                const option = document.createElement('option');
+                option.value = size.id;
+                option.text = size.size;
+
+                sizeSelect.appendChild(option);
+            });
+
+        })
+        .catch(err => {
+            console.error(err);
+            alert('Error loading sizes');
+        });
+}
+
+</script>
+
+{% endblock %}

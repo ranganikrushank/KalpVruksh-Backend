@@ -1,0 +1,220 @@
+{% extends "school/base.html" %}
+{% block title %}School Dashboard{% endblock %}
+
+{% block content %}
+
+<!-- ===================== TOP STATS ===================== -->
+
+<div class="row mb-4">
+
+    <!-- Coins -->
+    <div class="col-md-3">
+        <div class="card text-white bg-dark shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title">Available Coins</h5>
+                <p class="card-text display-5">
+                    {{ coin_balance }}
+                </p>
+                <small>Commission: {{ commission }}%</small>
+            </div>
+        </div>
+    </div>
+
+    <!-- Student Stock -->
+    <div class="col-md-3">
+        <div class="card text-white bg-primary shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title">Student Stock</h5>
+                <p class="card-text display-5">
+                    {{ stats.student_stock }}
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Staff Stock -->
+    <div class="col-md-3">
+        <div class="card text-white bg-success shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title">Staff Stock</h5>
+                <p class="card-text display-5">
+                    {{ stats.staff_stock }}
+                </p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Pending Shipments -->
+    <div class="col-md-3">
+        <div class="card text-white bg-info shadow-sm">
+            <div class="card-body">
+                <h5 class="card-title">Pending Shipments</h5>
+                <p class="card-text display-5">
+                    {{ stats.pending_shipments }}
+                </p>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<!-- ===================== PRODUCT WATCH SECTION ===================== -->
+
+<div class="card shadow-sm mb-4">
+    <div class="card-header">
+        <h5><i class="bi bi-box-seam"></i> Student Visible Products</h5>
+    </div>
+    <div class="card-body">
+
+        {% if student_inventory %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Product</th>
+                        <th>SKU</th>
+                        <th>Price</th>
+                        <th>Available Qty</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for inv in student_inventory %}
+                    <tr>
+                        <td>{{ inv.product.name }}</td>
+                        <td>{{ inv.product.sku }}</td>
+                        <td>₹{{ inv.product.unit_price }}</td>
+                        <td>{{ inv.quantity }}</td>
+                        <td>
+                            {% if inv.quantity > inv.low_stock_threshold %}
+                                <span class="badge bg-success">In Stock</span>
+                            {% elif inv.quantity > 0 %}
+                                <span class="badge bg-warning text-dark">Low Stock</span>
+                            {% else %}
+                                <span class="badge bg-danger">Out of Stock</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+            <div class="text-muted">No student products available.</div>
+        {% endif %}
+
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-header">
+        <h5><i class="bi bi-people"></i> Staff Products</h5>
+    </div>
+    <div class="card-body">
+
+        {% if staff_inventory %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Product</th>
+                        <th>SKU</th>
+                        <th>Price</th>
+                        <th>Available Qty</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for inv in staff_inventory %}
+                    <tr>
+                        <td>{{ inv.product.name }}</td>
+                        <td>{{ inv.product.sku }}</td>
+                        <td>₹{{ inv.product.unit_price }}</td>
+                        <td>{{ inv.quantity }}</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+            <div class="text-muted">No staff products available.</div>
+        {% endif %}
+
+    </div>
+</div>
+
+<!-- ===================== RECENT SHIPMENTS ===================== -->
+
+<div class="card shadow-sm">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5><i class="bi bi-truck"></i> Recent Shipments</h5>
+        <a href="{{ url_for('school_shipments_page') }}"
+           class="btn btn-sm btn-outline-primary">
+            View All
+        </a>
+    </div>
+
+    <div class="card-body">
+
+        {% if recent_shipments %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>ID</th>
+                        <th>Seller</th>
+                        <th>Category</th>
+                        <th>Qty</th>
+                        <th>Status</th>
+                        <th>Date</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+
+                {% for s in recent_shipments %}
+                <tr>
+                    <td>#{{ s.id }}</td>
+                    <td>{{ s.from_seller.name }}</td>
+                    <td>{{ s.items[0].category.value|replace('_', ' ')|title }}</td>
+                    <td>{{ s.items|sum(attribute='quantity') }}</td>
+                    <td>
+                        <span class="badge 
+                            {% if s.status.value == 'on_the_way' %}
+                                bg-warning text-dark
+                            {% elif s.status.value == 'delivered' %}
+                                bg-success
+                            {% else %}
+                                bg-secondary
+                            {% endif %}
+                        ">
+                            {{ s.status.value|replace('_', ' ')|title }}
+                        </span>
+                    </td>
+                    <td>{{ s.created_at.strftime('%d %b %Y') }}</td>
+                    <td>
+                        {% if s.status.value == 'on_the_way' %}
+                        <form method="POST"
+                              action="{{ url_for('receive_shipment', shipment_id=s.id) }}">
+                            <button type="submit"
+                                    class="btn btn-sm btn-success">
+                                Mark as Received
+                            </button>
+                        </form>
+                        {% else %}
+                            <span class="text-success">Received</span>
+                        {% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+            <div class="text-muted">No shipments yet.</div>
+        {% endif %}
+
+    </div>
+</div>
+
+{% endblock %}

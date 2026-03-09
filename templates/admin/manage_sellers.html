@@ -1,0 +1,268 @@
+{% extends "admin/base.html" %}
+
+{% block title %}Manage Sellers{% endblock %}
+
+{% block content %}
+
+<div class="card shadow-sm">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5 class="mb-0">
+            <i class="bi bi-briefcase"></i> Seller Management
+        </h5>
+        <button class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#addSellerModal">
+            <i class="bi bi-plus-lg"></i> Add Seller
+        </button>
+    </div>
+
+    <div class="card-body">
+
+        {% if sellers %}
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>ID</th>
+                        <th>Name</th>
+                        <th>Company</th>
+                        <th>Contact</th>
+                        <th>Phone</th>
+                        <th>Email</th>
+                        <th>Login Username</th>
+                        <th width="120">Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+
+                {% for seller in sellers %}
+                {% set seller_user = seller.users[0] if seller.users else None %}
+                <tr>
+                    <td>#{{ seller.id }}</td>
+                    <td><strong>{{ seller.name }}</strong></td>
+                    <td>{{ seller.company_name or '-' }}</td>
+                    <td>{{ seller.contact_person or '-' }}</td>
+                    <td>{{ seller.contact_phone or '-' }}</td>
+                    <td>{{ seller.contact_email or '-' }}</td>
+
+                    <td>
+                        {% if seller_user %}
+                            <span class="badge bg-dark">
+                                {{ seller_user.username }}
+                            </span>
+                        {% else %}
+                            <span class="badge bg-danger">No User</span>
+                        {% endif %}
+                    </td>
+
+                    <td>
+                        <button class="btn btn-sm btn-outline-primary"
+                                data-bs-toggle="modal"
+                                data-bs-target="#editSellerModal{{ seller.id }}">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                    </td>
+                </tr>
+
+                <!-- EDIT SELLER MODAL -->
+                <div class="modal fade" id="editSellerModal{{ seller.id }}" tabindex="-1">
+                    <div class="modal-dialog modal-lg">
+                        <div class="modal-content">
+
+                            <div class="modal-header">
+                                <h5 class="modal-title">Edit Seller</h5>
+                                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                            </div>
+
+                            <form method="POST" action="{{ url_for('manage_sellers_page') }}">
+                                <input type="hidden" name="seller_id" value="{{ seller.id }}">
+
+                                <div class="modal-body">
+
+                                    <div class="row">
+                                        <div class="col-md-6 mb-3">
+                                            <label class="form-label">Seller Name *</label>
+                                            <input type="text" name="name"
+                                                   class="form-control"
+                                                   value="{{ seller.name }}" required>
+                                        </div>
+
+                                        <div class="col-md-6 mb-3">
+                                            <label class="form-label">Company Name</label>
+                                            <input type="text" name="company_name"
+                                                   class="form-control"
+                                                   value="{{ seller.company_name }}">
+                                        </div>
+                                    </div>
+
+                                    <div class="row">
+                                        <div class="col-md-6 mb-3">
+                                            <label class="form-label">Contact Person</label>
+                                            <input type="text" name="contact_person"
+                                                   class="form-control"
+                                                   value="{{ seller.contact_person }}">
+                                        </div>
+
+                                        <div class="col-md-6 mb-3">
+                                            <label class="form-label">Phone</label>
+                                            <input type="tel" name="contact_phone"
+                                                   class="form-control"
+                                                   value="{{ seller.contact_phone }}">
+                                        </div>
+                                    </div>
+
+                                    <div class="row">
+                                        <div class="col-md-6 mb-3">
+                                            <label class="form-label">Email *</label>
+                                            <input type="email" name="contact_email"
+                                                   class="form-control"
+                                                   value="{{ seller.contact_email }}" required>
+                                        </div>
+
+                                        <div class="col-md-6 mb-3">
+                                            <label class="form-label">Address</label>
+                                            <textarea name="address"
+                                                      class="form-control"
+                                                      rows="2">{{ seller.address }}</textarea>
+                                        </div>
+                                    </div>
+
+                                    <hr>
+                                    <h6>Login Credentials</h6>
+
+                                    <div class="row">
+                                        <div class="col-md-6 mb-3">
+                                            <label class="form-label">Username *</label>
+                                            <input type="text" name="username"
+                                                   class="form-control"
+                                                   value="{{ seller_user.username if seller_user }}" required>
+                                        </div>
+
+                                        <div class="col-md-6 mb-3">
+                                            <label class="form-label">New Password *</label>
+                                            <input type="password" name="password"
+                                                   class="form-control"
+                                                   placeholder="Enter new password" required>
+                                        </div>
+                                    </div>
+
+                                </div>
+
+                                <div class="modal-footer">
+                                    <button type="button"
+                                            class="btn btn-secondary"
+                                            data-bs-dismiss="modal">
+                                        Cancel
+                                    </button>
+                                    <button type="submit"
+                                            class="btn btn-primary">
+                                        Update Seller
+                                    </button>
+                                </div>
+
+                            </form>
+                        </div>
+                    </div>
+                </div>
+
+                {% endfor %}
+                </tbody>
+            </table>
+        </div>
+
+        {% else %}
+        <div class="alert alert-info text-center py-5">
+            <i class="bi bi-briefcase fs-2"></i>
+            <h5 class="mt-3">No sellers yet</h5>
+            <p>Add your first seller using the button above.</p>
+        </div>
+        {% endif %}
+
+    </div>
+</div>
+
+
+<!-- ADD SELLER MODAL -->
+<div class="modal fade" id="addSellerModal" tabindex="-1">
+    <div class="modal-dialog modal-lg">
+        <div class="modal-content">
+
+            <div class="modal-header">
+                <h5 class="modal-title">Add New Seller</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+
+            <form method="POST" action="{{ url_for('manage_sellers_page') }}">
+
+                <div class="modal-body">
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Seller Name *</label>
+                            <input type="text" name="name" class="form-control" required>
+                        </div>
+
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Company Name</label>
+                            <input type="text" name="company_name" class="form-control">
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Contact Person</label>
+                            <input type="text" name="contact_person" class="form-control">
+                        </div>
+
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Phone</label>
+                            <input type="tel" name="contact_phone" class="form-control">
+                        </div>
+                    </div>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Email *</label>
+                            <input type="email" name="contact_email" class="form-control" required>
+                        </div>
+
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Address</label>
+                            <textarea name="address" class="form-control" rows="2"></textarea>
+                        </div>
+                    </div>
+
+                    <hr>
+                    <h6>Login Credentials</h6>
+
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Username *</label>
+                            <input type="text" name="username" class="form-control" required>
+                        </div>
+
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Password *</label>
+                            <input type="password" name="password" class="form-control" required>
+                        </div>
+                    </div>
+
+                </div>
+
+                <div class="modal-footer">
+                    <button type="button"
+                            class="btn btn-secondary"
+                            data-bs-dismiss="modal">
+                        Cancel
+                    </button>
+                    <button type="submit"
+                            class="btn btn-primary">
+                        Save Seller
+                    </button>
+                </div>
+
+            </form>
+
+        </div>
+    </div>
+</div>
+
+{% endblock %}

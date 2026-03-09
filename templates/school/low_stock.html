@@ -1,0 +1,55 @@
+{% extends "school/base.html" %}
+{% block title %}Low Stock{% endblock %}
+
+{% block content %}
+
+<div class="container-fluid py-4">
+
+    <h3 class="fw-bold mb-4">Low Stock Alerts</h3>
+
+    <div class="card shadow-sm">
+        <div class="card-body table-responsive">
+
+            <table class="table table-striped table-hover align-middle">
+                <thead class="table-dark">
+                    <tr>
+                        <th>Product</th>
+                        <th>Size</th>
+                        <th>Category</th>
+                        <th>Current Stock</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+
+                {% if low_stock_items %}
+                    {% for item in low_stock_items %}
+                    <tr>
+                        <td>{{ item.product.name }}</td>
+                        <td>{{ item.size.size }}</td>
+                        <td>{{ item.category.value }}</td>
+                        <td class="text-danger fw-bold">{{ item.quantity }}</td>
+                        <td>
+                            <span class="badge bg-danger">
+                                Below {{ threshold }}
+                            </span>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="5" class="text-center text-muted">
+                            No low stock items
+                        </td>
+                    </tr>
+                {% endif %}
+
+                </tbody>
+            </table>
+
+        </div>
+    </div>
+
+</div>
+
+{% endblock %}

@@ -1,0 +1,93 @@
+{% extends "seller/base.html" %}
+
+{% block title %}Dispatch Instructions{% endblock %}
+
+{% block content %}
+<div class="card">
+    <div class="card-header d-flex justify-content-between align-items-center">
+        <h5><i class="bi bi-list-check"></i> Assigned Dispatch Instructions</h5>
+        <button class="btn btn-sm btn-outline-primary" onclick="location.reload()">
+            <i class="bi bi-arrow-clockwise"></i> Refresh
+        </button>
+    </div>
+    <div class="card-body">
+        {% if instructions %}
+        <div class="table-responsive">
+            <table class="table table-hover">
+                <thead>
+                    <tr>
+                        <th>ID</th>
+                        <th>School</th>
+                        <th>Product</th>
+                        <th>Category</th>
+                        <th>Qty</th>
+                        <th>Status</th>
+                        <th>Action</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for i in instructions %}
+                    <tr>
+                        <td>#{{ i.id }}</td>
+                        <td>{{ i.school.name }}</td>
+                        <td>{{ i.product.name }}</td>
+                        <td>{{ i.category|title }}</td>
+                        <td>{{ i.quantity }}</td>
+                        <td>
+                            <span class="badge status-{{ i.status.lower().replace(' ', '-') }}">
+                                {{ i.status }}
+                            </span>
+                        </td>
+                        <td>
+                            {% if i.status == 'PENDING' %}
+                            <button class="btn btn-sm btn-success" 
+                                    onclick="fulfillDispatch({{ i.id }})">
+                                <i class="bi bi-truck"></i> Fulfill
+                            </button>
+                            {% else %}
+                            <span class="text-muted">Fulfilled</span>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+        {% else %}
+        <div class="alert alert-info text-center">
+            <i class="bi bi-file-earmark-text"></i>
+            <h5>No dispatch instructions assigned</h5>
+            <p>Wait for Super Admin to assign dispatch instructions.</p>
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+function fulfillDispatch(instructionId) {
+
+    if (!confirm('Are you sure you want to fulfill this dispatch instruction?')) {
+        return;
+    }
+
+    fetch(`/api/seller/fulfill-dispatch/${instructionId}`, {
+        method: 'POST'
+    })
+    .then(response => response.json())
+    .then(data => {
+
+        if (data.message) {
+            alert('Shipment marked as ON THE WAY');
+            location.reload();
+        } else {
+            alert(data.error || 'Something went wrong');
+        }
+
+    })
+    .catch(err => {
+        console.error(err);
+        alert('Network error');
+    });
+}
+</script>
+{% endblock %}

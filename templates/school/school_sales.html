@@ -1,0 +1,51 @@
+{% extends "school/base.html" %}
+{% block title %}School Sales{% endblock %}
+
+{% block content %}
+
+<div class="card shadow-sm">
+    <div class="card-header">
+        <h5>School Sales Overview</h5>
+    </div>
+
+    <div class="card-body">
+
+        <table class="table table-hover" id="salesTable">
+            <thead>
+                <tr>
+                    <th>School</th>
+                    <th>Product</th>
+                    <th>Total Sent</th>
+                    <th>Total Sold</th>
+                    <th>Remaining</th>
+                </tr>
+            </thead>
+            <tbody></tbody>
+        </table>
+
+    </div>
+</div>
+
+<script>
+fetch('/api/seller/school-sales')
+.then(res => res.json())
+.then(data => {
+
+    const tbody = document.querySelector('#salesTable tbody');
+
+    data.forEach(row => {
+        tbody.innerHTML += `
+            <tr>
+                <td>${row.school}</td>
+                <td>${row.product}</td>
+                <td>${row.total_sent}</td>
+                <td>${row.total_sold}</td>
+                <td>${row.remaining_at_school}</td>
+            </tr>
+        `;
+    });
+
+});
+</script>
+
+{% endblock %}
