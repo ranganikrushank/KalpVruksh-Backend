@@ -147,27 +147,28 @@ def create_app():
 
     with app.app_context():
         db.create_all()
-        
-        # Create super admin if doesn't exist
-        admin = User.query.filter_by(role=UserRole.SUPER_ADMIN).first()
 
-        if not admin:
-            try:
-                super_admin = User(
+        try:
+            admin = User.query.filter_by(role=UserRole.SUPER_ADMIN).first()
+
+            if not admin:
+
+                admin = User(
                     full_name="Super Admin",
-                    phone_number="7778888578",
                     username="admin",
                     email="admin@system.com",
+                    phone_number="7778888578",
                     role=UserRole.SUPER_ADMIN
                 )
 
-                super_admin.set_password("ad123")
+                admin.set_password("ad123")
 
-                db.session.add(super_admin)
+                db.session.add(admin)
                 db.session.commit()
 
-            except Exception:
-                db.session.rollback()
+        except Exception as e:
+            db.session.rollback()
+            print("Admin creation failed:", str(e))
 
     # === AUTHENTICATION HELPERS (JWT ONLY) ===
     from flask_jwt_extended import get_jwt
