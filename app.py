@@ -156,6 +156,8 @@ def create_app():
                 super_admin = User(
                     full_name="Super Admin",
                     phone_number="7778888578",
+                    username="admin",
+                    email="admin@system.com",
                     role=UserRole.SUPER_ADMIN
                 )
 
