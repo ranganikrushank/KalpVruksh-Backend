@@ -18,6 +18,7 @@ from models import (
     CategoryType,
     SellerInventory,
     SchoolInventory,
+    SellerSchoolProduct,
     Shipment,
     ShipmentItem,
     Order,
@@ -580,22 +581,102 @@ def create_app():
 
                     db.session.add(image_entry)
 
-            # 🚫 NO AUTO ALLOCATION HERE
-            # Allocation must be done manually
+            # ===============================
+                    # ===============================
+            # CREATE SELLER INVENTORY
+            # ===============================
+
+            seller_ids = request.form.getlist("seller_ids[]")
+            school_ids = request.form.getlist("school_ids[]")
+
+            sizes = ProductSize.query.filter_by(product_id=product.id).all()
+
+            for seller_id in seller_ids:
+
+                seller_id = int(seller_id)
+
+                for size in sizes:
+
+                    existing = SellerInventory.query.filter_by(
+                        seller_id=seller_id,
+                        product_id=product.id,
+                        size_id=size.id
+                    ).first()
+
+                    if not existing:
+
+                        db.session.add(
+                            SellerInventory(
+                                seller_id=seller_id,
+                                product_id=product.id,
+                                size_id=size.id,
+                                total_allocated=0,
+                                sent_stock=0,
+                                remaining_stock=0
+                            )
+                        )
+
+            # ===============================
+            # CREATE SCHOOL INVENTORY
+            # ===============================
+
+            for school_id in school_ids:
+
+                school_id = int(school_id)
+
+                for size in sizes:
+
+                    existing = SchoolInventory.query.filter_by(
+                        school_id=school_id,
+                        product_id=product.id,
+                        size_id=size.id,
+                        category=CategoryType.STUDENT
+                    ).first()
+
+                    if not existing:
+
+                        db.session.add(
+                            SchoolInventory(
+                                school_id=school_id,
+                                product_id=product.id,
+                                size_id=size.id,
+                                category=CategoryType.STUDENT,
+                                quantity=0,
+                                low_stock_threshold=10
+                            )
+                        )
+
+            # ===============================
+            # MAP SELLER SCHOOL PRODUCT
+            # ===============================
+
+            for seller_id in seller_ids:
+
+                seller_id = int(seller_id)
+
+                for school_id in school_ids:
+
+                    school_id = int(school_id)
+
+                    existing = SellerSchoolProduct.query.filter_by(
+                        seller_id=seller_id,
+                        product_id=product.id,
+                        school_id=school_id
+                    ).first()
+
+                    if not existing:
+
+                        db.session.add(
+                            SellerSchoolProduct(
+                                seller_id=seller_id,
+                                product_id=product.id,
+                                school_id=school_id
+                            )
+                        )
 
             db.session.commit()
 
             return redirect('/admin/products')
-
-        # ===== GET REQUEST =====
-        products = Product.query.all()
-        schools = School.query.all()
-
-        return render_template(
-            'admin/manage_products.html',
-            products=products,
-            schools=schools
-        )
     
     @app.route('/admin/inventory')
     @session_login_required(UserRole.SUPER_ADMIN)
@@ -1629,10 +1710,23 @@ def create_app():
                         "item": item
                     }), 400
 
+                # FIND SELLER FOR PRODUCT + SCHOOL
+                mapping = SellerSchoolProduct.query.filter_by(
+                    product_id=product_id,
+                    school_id=user.school_id
+                ).first()
+
+                if not mapping:
+                    db.session.rollback()
+                    return jsonify({"error": "Seller not mapped for this product"}), 400
+
+                seller_id = mapping.seller_id
+
                 order_item = OrderItem(
                     order_id=order.id,
                     product_id=int(product_id),
                     size_id=int(size_id),
+                    seller_id=seller_id,
                     quantity=int(quantity),
                     unit_price=float(price),
                     total_price=float(subtotal)
@@ -1675,6 +1769,39 @@ def create_app():
                 "details": str(e)
             }), 500
     
+    @app.route("/api/seller/orders", methods=["GET"])
+    @jwt_required()
+    @role_required(UserRole.SELLER)
+    def seller_orders():
+
+        user = get_current_user()
+
+        items = OrderItem.query.filter_by(
+            seller_id=user.seller_id
+        ).all()
+
+        result = []
+
+        for item in items:
+
+            order = Order.query.get(item.order_id)
+            product = Product.query.get(item.product_id)
+            school = School.query.get(order.school_id)
+
+            result.append({
+                "order_id": order.id,
+                "product_name": product.name,
+                "size": item.size.size if item.size else None,
+                "quantity": item.quantity,
+                "price": item.unit_price,
+                "total": item.total_price,
+                "school_name": school.name,
+                "status": order.status,
+                "created_at": order.created_at
+            })
+
+        return jsonify(result), 200
+
     @app.route('/api/student/products/<int:school_id>', methods=['GET'])
     @jwt_required()
     @role_required(UserRole.STUDENT)
@@ -1682,36 +1809,60 @@ def create_app():
 
         try:
 
-            inventory_items = SchoolInventory.query.filter(
-                SchoolInventory.school_id == school_id,
-                SchoolInventory.category == CategoryType.STUDENT
+            # Get all products mapped to this school
+            mappings = SellerSchoolProduct.query.filter_by(
+                school_id=school_id
             ).all()
 
             products = []
 
-            for inv in inventory_items:
+            for mapping in mappings:
 
-                product = Product.query.get(inv.product_id)
+                product = Product.query.get(mapping.product_id)
 
                 if not product:
                     continue
 
+                # Fetch product images
                 images = [
                     request.host_url.rstrip("/") + img.image_url
                     for img in ProductImage.query.filter_by(product_id=product.id).all()
                 ]
 
-                products.append({
-                    "inventory_id": inv.id,
-                    "product_id": product.id,
-                    "name": product.name,
-                    "description": product.description,
-                    "price": product.unit_price,
-                    "size_id": inv.size_id,
-                    "size": inv.size.size if inv.size else None,
-                    "available_quantity": inv.quantity,
-                    "images": images
-                })
+                # Fetch product sizes
+                sizes = ProductSize.query.filter_by(product_id=product.id).all()
+
+                # If product has sizes
+                if sizes:
+
+                    for size in sizes:
+
+                        products.append({
+                            "inventory_id": f"{product.id}_{size.id}",  # virtual inventory id
+                            "product_id": product.id,
+                            "name": product.name,
+                            "description": product.description,
+                            "price": product.unit_price,
+                            "size_id": size.id,
+                            "size": size.size,
+                            "available_quantity": 9999,  # virtual stock until seller ships
+                            "images": images
+                        })
+
+                else:
+
+                    # Product without sizes
+                    products.append({
+                        "inventory_id": f"{product.id}_0",
+                        "product_id": product.id,
+                        "name": product.name,
+                        "description": product.description,
+                        "price": product.unit_price,
+                        "size_id": None,
+                        "size": None,
+                        "available_quantity": 9999,
+                        "images": images
+                    })
 
             return jsonify(products), 200
 
@@ -1873,6 +2024,21 @@ def create_app():
 
 
             # ===============================
+            # ADD COMMISSION COINS TO SCHOOL
+            # ===============================
+
+            school = School.query.get(order.school_id)
+
+            if school and school.commission_percentage:
+
+                commission_amount = round(
+                    order.total_amount * school.commission_percentage / 100
+                )
+
+                school.coin_balance += commission_amount
+
+
+            # ===============================
             # DEDUCT STOCK + LEDGER
             # ===============================
 
@@ -1955,15 +2121,34 @@ def create_app():
     def school_inventory_products():
 
         try:
+
             user = get_current_user()
+
+            if not user or not user.school_id:
+                return jsonify({
+                    "success": False,
+                    "error": "School not assigned"
+                }), 400
+
+            # ===============================
+            # LOAD SCHOOL INVENTORY
+            # ===============================
 
             inventories = (
                 SchoolInventory.query
                 .options(
-                    joinedload(SchoolInventory.product),
+                    joinedload(SchoolInventory.product)
+                    .joinedload(Product.sizes),
+
+                    joinedload(SchoolInventory.product)
+                    .joinedload(Product.seller_inventory),
+
                     joinedload(SchoolInventory.size)
                 )
-                .filter_by(school_id=user.school_id)
+                .filter(
+                    SchoolInventory.school_id == user.school_id
+                )
+                .order_by(SchoolInventory.id.desc())
                 .all()
             )
 
@@ -1974,51 +2159,100 @@ def create_app():
                 product = inv.product
                 size = inv.size
 
+                if not product:
+                    continue
+
                 # ===============================
-                # PRODUCT IMAGES
+                # LOAD PRODUCT IMAGES
                 # ===============================
-                images = [
-                    img.image_url
-                    for img in ProductImage.query
-                    .filter_by(product_id=inv.product_id)
-                    .order_by(ProductImage.display_order)
+
+                image_rows = (
+                    ProductImage.query
+                    .filter_by(product_id=product.id)
+                    .order_by(ProductImage.display_order.asc())
                     .all()
-                ]
+                )
 
-                product_name = product.name if product else "Unknown"
-                sku = product.sku if product else "-"
-                unit_price = product.unit_price if product else 0
+                images = []
 
-                quantity = inv.quantity or 0
+                for img in image_rows:
+
+                    if not img.image_url:
+                        continue
+
+                    if img.image_url.startswith("http"):
+                        images.append(img.image_url)
+
+                    else:
+                        images.append(
+                            request.host_url.rstrip("/") + img.image_url
+                        )
+
+                # ===============================
+                # SAFE VALUE HANDLING
+                # ===============================
+
+                product_name = product.name or "Unknown"
+
+                sku = product.sku or "-"
+
+                unit_price = float(product.unit_price or 0)
+
+                quantity = int(inv.quantity or 0)
+
                 size_label = size.size if size else "DEFAULT"
+
+                category = (
+                    inv.category.value.upper()
+                    if inv.category else "STUDENT"
+                )
 
                 total_value = unit_price * quantity
 
+                # ===============================
+                # RESPONSE OBJECT
+                # ===============================
+
                 result.append({
+
                     "inventory_id": inv.id,
-                    "product_id": inv.product_id,
+
+                    "product_id": product.id,
 
                     "product_name": product_name,
+
                     "sku": sku,
 
                     "size_id": inv.size_id,
+
                     "size": size_label,
 
-                    "category": inv.category.value if inv.category else None,
+                    "category": category,
 
                     "quantity": quantity,
+
                     "unit_price": unit_price,
+
                     "total_value": total_value,
 
                     "images": images
+
                 })
 
-            return jsonify(result), 200
+            return jsonify({
+                "success": True,
+                "data": result
+            }), 200
+
 
         except Exception as e:
-            print("Inventory products error:", str(e))
+
+            print("School inventory error:", str(e))
+
             return jsonify({
-                "error": "Failed to load inventory"
+                "success": False,
+                "error": "Failed to load inventory",
+                "details": str(e)
             }), 500
     
     @app.route('/api/school/place-order', methods=['POST'])
@@ -2050,15 +2284,16 @@ def create_app():
                 order = Order(
                     student_id=None,
                     school_id=school.id,
-                    status="pending",
-                    payment_status="PENDING"
+                    status="PENDING",
+                    payment_status="PENDING",
+                    payment_mode="OFFLINE"
                 )
 
             elif category == "staff":
 
                 order = StaffOrder(
                     school_id=school.id,
-                    status="pending"
+                    status="PENDING"
                 )
 
             else:
@@ -2070,7 +2305,7 @@ def create_app():
             order_items_buffer = []
 
             # ===============================
-            # PREPARE ITEMS (NO STOCK CHANGE YET)
+            # PREPARE ITEMS
             # ===============================
 
             for item in items:
@@ -2096,7 +2331,6 @@ def create_app():
 
                 order_items_buffer.append((item, inventory, total_price))
 
-
             # ===============================
             # PAYMENT VIA COINS
             # ===============================
@@ -2114,10 +2348,22 @@ def create_app():
 
                     if category == "student":
 
+                        # FIND SELLER FOR PRODUCT + SCHOOL
+                        mapping = SellerSchoolProduct.query.filter_by(
+                            product_id=item["product_id"],
+                            school_id=school.id
+                        ).first()
+
+                        if not mapping:
+                            return jsonify({
+                                "error": f"Seller mapping not found for product {item['product_id']}"
+                            }), 400
+
                         order_item = OrderItem(
                             order_id=order.id,
                             product_id=item["product_id"],
                             size_id=item["size_id"],
+                            seller_id=mapping.seller_id,
                             quantity=item["quantity"],
                             unit_price=item["unit_price"],
                             total_price=total_price
@@ -2186,9 +2432,7 @@ def create_app():
                     "amount": total_amount
                 }), 200
 
-
             return jsonify({"error": "Invalid payment method"}), 400
-
 
         except Exception as e:
 
@@ -4467,9 +4711,6 @@ def create_app():
                     quantities = request.form.getlist("quantities")
 
                     seller_ids = request.form.getlist("seller_ids[]")
-                    seller_sizes = request.form.getlist("seller_sizes[]")
-                    seller_quantities = request.form.getlist("seller_quantities[]")
-
                     school_ids = request.form.getlist("school_ids[]")
 
                     total_quantity = request.form.get("total_quantity")
@@ -4484,14 +4725,11 @@ def create_app():
                     quantities = [str(s.get("quantity")) for s in data.get("sizes", [])]
 
                     seller_ids = data.get("seller_ids", [])
-                    seller_quantities = data.get("seller_quantities", [])
-
                     school_ids = data.get("school_ids", [])
 
                     total_quantity = data.get("total_quantity")
 
                     files = []
-
 
                 # ================= VALIDATION =================
 
@@ -4515,7 +4753,6 @@ def create_app():
                 if unit_price < 0:
                     return jsonify({"error": "Price cannot be negative"}), 400
 
-
                 # ================= CREATE PRODUCT =================
 
                 product = Product(
@@ -4529,9 +4766,7 @@ def create_app():
                 db.session.add(product)
                 db.session.flush()
 
-                total_product_qty = 0
                 created_sizes = []
-
 
                 # ================= SIZE PRODUCT =================
 
@@ -4542,7 +4777,6 @@ def create_app():
                     for i in range(len(sizes)):
 
                         size_name = sizes[i]
-
                         qty = int(quantities[i])
 
                         if size_name in seen_sizes:
@@ -4552,8 +4786,6 @@ def create_app():
                             return jsonify({"error": f"Invalid quantity for {size_name}"}), 400
 
                         seen_sizes.add(size_name)
-
-                        total_product_qty += qty
 
                         size_obj = ProductSize(
                             product_id=product.id,
@@ -4573,11 +4805,6 @@ def create_app():
 
                     qty = int(total_quantity)
 
-                    if qty <= 0:
-                        return jsonify({"error": "Invalid quantity"}), 400
-
-                    total_product_qty = qty
-
                     size_obj = ProductSize(
                         product_id=product.id,
                         size="DEFAULT",
@@ -4588,7 +4815,6 @@ def create_app():
                     db.session.flush()
 
                     created_sizes.append(size_obj)
-
 
                 # ================= IMAGE UPLOAD =================
 
@@ -4613,42 +4839,18 @@ def create_app():
                         )
                     )
 
-
                 # ================= SELLER INVENTORY =================
 
-                for i in range(len(seller_ids)):
+                for seller_id in seller_ids:
 
-                    seller_id = int(seller_ids[i])
-
-                    try:
-                        qty = int(seller_quantities[i])
-                    except:
-                        qty = total_product_qty
-
-                    size_value = seller_sizes[i]
-
-                    if size_value == "NO_SIZE":
-                        size_value = "DEFAULT"
+                    seller_id = int(seller_id)
 
                     seller = db.session.get(Seller, seller_id)
 
                     if not seller:
                         return jsonify({"error": f"Seller {seller_id} not found"}), 404
 
-
-                    # Find correct size object
-                    size_obj = None
-                    for s in created_sizes:
-                        if s.size == size_value:
-                            size_obj = s
-                            break
-
-                    if not size_obj:
-                        return jsonify({"error": f"Size {size_value} not found"}), 400
-
-
-                    # 🔴 VERY IMPORTANT: prevent duplicate insert
-                    with db.session.no_autoflush:
+                    for size_obj in created_sizes:
 
                         existing_inventory = SellerInventory.query.filter_by(
                             seller_id=seller_id,
@@ -4656,33 +4858,29 @@ def create_app():
                             size_id=size_obj.id
                         ).first()
 
+                        if not existing_inventory:
 
-                    if existing_inventory:
-
-                        existing_inventory.total_allocated += qty
-                        existing_inventory.remaining_stock += qty
-
-                    else:
-
-                        db.session.add(
-                            SellerInventory(
-                                seller_id=seller_id,
-                                product_id=product.id,
-                                size_id=size_obj.id,
-                                total_allocated=qty,
-                                sent_stock=0,
-                                remaining_stock=qty
+                            db.session.add(
+                                SellerInventory(
+                                    seller_id=seller_id,
+                                    product_id=product.id,
+                                    size_id=size_obj.id,
+                                    total_allocated=0,
+                                    sent_stock=0,
+                                    remaining_stock=0
+                                )
                             )
-                        )
-                # ================= ASSIGN SCHOOLS TO SELLER PRODUCT =================
+
+                # ================= MAP SELLER TO SCHOOL PRODUCT =================
 
                 for seller_id in seller_ids:
+
                     seller_id = int(seller_id)
 
                     for school_id in school_ids:
+
                         school_id = int(school_id)
 
-                        # prevent duplicates
                         existing = SellerSchoolProduct.query.filter_by(
                             seller_id=seller_id,
                             product_id=product.id,
@@ -4690,20 +4888,49 @@ def create_app():
                         ).first()
 
                         if not existing:
+
                             db.session.add(
                                 SellerSchoolProduct(
                                     seller_id=seller_id,
                                     product_id=product.id,
                                     school_id=school_id
                                 )
-            )
+                            )
+
+                # ================= CREATE SCHOOL INVENTORY =================
+
+                for school_id in school_ids:
+
+                    school_id = int(school_id)
+
+                    for size_obj in created_sizes:
+
+                        existing_inventory = SchoolInventory.query.filter_by(
+                            school_id=school_id,
+                            product_id=product.id,
+                            size_id=size_obj.id,
+                            category=CategoryType.STUDENT
+                        ).first()
+
+                        if not existing_inventory:
+
+                            db.session.add(
+                                SchoolInventory(
+                                    school_id=school_id,
+                                    product_id=product.id,
+                                    size_id=size_obj.id,
+                                    category=CategoryType.STUDENT,
+                                    quantity=size_obj.quantity,
+                                    low_stock_threshold=10
+                                )
+                            )
+
                 db.session.commit()
 
                 return jsonify({
                     "message": "Product created successfully",
                     "product_id": product.id
                 }), 201
-
 
             except Exception as e:
 
@@ -4716,7 +4943,6 @@ def create_app():
                     "details": str(e)
                 }), 500
 
-
         # ================= GET PRODUCTS =================
 
         products = Product.query.all()
@@ -4726,47 +4952,22 @@ def create_app():
         for p in products:
 
             sizes = ProductSize.query.filter_by(product_id=p.id).all()
-
-            total_qty = sum(s.quantity for s in sizes)
-
-            seller_inventory = SellerInventory.query.filter_by(
-                product_id=p.id
-            ).all()
-
-            allocated_qty = sum(inv.total_allocated for inv in seller_inventory)
-
-            images = ProductImage.query.filter_by(
-                product_id=p.id
-            ).all()
-
+            images = ProductImage.query.filter_by(product_id=p.id).all()
 
             response.append({
-
                 "id": p.id,
                 "name": p.name,
                 "sku": p.sku,
                 "category": p.category,
                 "unit_price": p.unit_price,
-                "total_qty": total_qty,
-                "allocated": allocated_qty,
-
                 "sizes": [
                     {
                         "id": s.id,
-                        "size": None if s.size == "DEFAULT" else s.size,
+                        "size": s.size,
                         "quantity": s.quantity
-                    }
-                    for s in sizes
+                    } for s in sizes
                 ],
-
-                "images": [
-                    {
-                        "id": img.id,
-                        "image_url": img.image_url
-                    }
-                    for img in images
-                ]
-
+                "images": [img.image_url for img in images]
             })
 
         return jsonify(response), 200
@@ -5377,7 +5578,7 @@ def create_app():
         db.session.commit()
         return jsonify({'message': 'Stock allocated successfully'})
 
-    from flask import url_for
+    from sqlalchemy.orm import joinedload
 
     @app.route('/api/seller/inventory', methods=['GET'])
     @jwt_required()
@@ -5388,127 +5589,157 @@ def create_app():
 
             user = get_current_user()
 
-            inventories = SellerInventory.query.filter_by(
-                seller_id=user.seller_id
-            ).all()
+            if not user or not user.seller_id:
+                return jsonify({
+                    "success": False,
+                    "error": "Seller not assigned"
+                }), 400
+
+            # ===============================
+            # LOAD SELLER INVENTORY
+            # ===============================
+
+            inventories = (
+                SellerInventory.query
+                .options(
+                    joinedload(SellerInventory.product),
+                    joinedload(SellerInventory.size)
+                )
+                .filter(SellerInventory.seller_id == user.seller_id)
+                .order_by(SellerInventory.id.desc())
+                .all()
+            )
+
+            if not inventories:
+                return jsonify({
+                    "success": True,
+                    "data": []
+                }), 200
+
+            # ===============================
+            # COLLECT PRODUCT IDS
+            # ===============================
+
+            product_ids = list({inv.product_id for inv in inventories if inv.product_id})
+
+            # ===============================
+            # PRELOAD PRODUCT IMAGES
+            # ===============================
+
+            product_image_map = {}
+
+            if product_ids:
+
+                images = (
+                    ProductImage.query
+                    .filter(ProductImage.product_id.in_(product_ids))
+                    .order_by(ProductImage.display_order.asc())
+                    .all()
+                )
+
+                for img in images:
+
+                    if not img.product_id:
+                        continue
+
+                    # Only first image per product
+                    if img.product_id not in product_image_map:
+
+                        if img.image_url:
+
+                            if img.image_url.startswith("http"):
+                                product_image_map[img.product_id] = img.image_url
+                            else:
+                                product_image_map[img.product_id] = (
+                                    request.host_url.rstrip("/") + img.image_url
+                                )
+
+            # ===============================
+            # PRELOAD SCHOOL ALLOCATIONS
+            # ===============================
+
+            school_map = {}
+
+            if product_ids:
+
+                allocations = (
+                    SellerSchoolProduct.query
+                    .options(joinedload(SellerSchoolProduct.school))
+                    .filter(
+                        SellerSchoolProduct.seller_id == user.seller_id,
+                        SellerSchoolProduct.product_id.in_(product_ids)
+                    )
+                    .all()
+                )
+
+                for alloc in allocations:
+
+                    if alloc.product_id not in school_map:
+                        school_map[alloc.product_id] = []
+
+                    if alloc.school:
+                        school_map[alloc.product_id].append({
+                            "id": alloc.school.id,
+                            "name": alloc.school.name
+                        })
+
+            # ===============================
+            # BUILD RESPONSE
+            # ===============================
 
             result = []
 
-            # Cache schools per product
-            product_school_cache = {}
-
-            # Cache product images
-            product_image_cache = {}
-
-            # Cache sizes
-            size_cache = {}
-
             for inv in inventories:
 
-                product = db.session.get(Product, inv.product_id)
+                product = inv.product
+                size = inv.size
 
                 if not product:
                     continue
 
-
-                # ================= SIZE =================
-
-                size_value = "DEFAULT"
-
-                if inv.size_id:
-
-                    if inv.size_id not in size_cache:
-                        size_cache[inv.size_id] = db.session.get(ProductSize, inv.size_id)
-
-                    size_obj = size_cache[inv.size_id]
-
-                    if size_obj and size_obj.size:
-                        size_value = size_obj.size
-
-
-                # ================= PRODUCT IMAGE =================
-
-                if product.id not in product_image_cache:
-
-                    product_image = ProductImage.query.filter_by(
-                        product_id=product.id
-                    ).first()
-
-                    if product_image and product_image.image_url:
-                        product_image_cache[product.id] = (
-                            request.host_url.rstrip("/") + product_image.image_url
-                        )
-                    else:
-                        product_image_cache[product.id] = None
-
-                image = product_image_cache[product.id]
-
-
-                # ================= GET SCHOOLS =================
-
-                if product.id not in product_school_cache:
-
-                    allocations = SellerSchoolProduct.query.filter_by(
-                        seller_id=user.seller_id,
-                        product_id=product.id
-                    ).all()
-
-                    schools = []
-
-                    for alloc in allocations:
-
-                        if alloc.school:
-                            schools.append({
-                                "id": alloc.school.id,
-                                "name": alloc.school.name
-                            })
-                        else:
-                            # fallback safety
-                            school = db.session.get(School, alloc.school_id)
-                            if school:
-                                schools.append({
-                                    "id": school.id,
-                                    "name": school.name
-                                })
-
-                    product_school_cache[product.id] = schools
-
-                schools = product_school_cache[product.id]
-
-
-                # ================= RESPONSE =================
+                size_value = size.size if size else "DEFAULT"
 
                 result.append({
 
-                    "id": inv.id,
+                    "inventory_id": inv.id,
+
                     "product_id": product.id,
 
-                    "product_name": product.name,
-                    "sku": product.sku,
-                    "category": product.category,
-                    "price": product.unit_price,
+                    "product_name": product.name or "Unknown",
+
+                    "sku": product.sku or "-",
+
+                    "category": product.category or "GENERAL",
+
+                    "price": float(product.unit_price or 0),
+
+                    "size_id": inv.size_id,
 
                     "size": size_value,
 
-                    "image": image,
+                    "image": product_image_map.get(product.id),
 
-                    "total_allocated": inv.total_allocated,
-                    "sent_stock": inv.sent_stock,
-                    "remaining_stock": inv.remaining_stock,
+                    "total_allocated": int(inv.total_allocated or 0),
 
-                    "schools": schools
+                    "sent_stock": int(inv.sent_stock or 0),
+
+                    "remaining_stock": int(inv.remaining_stock or 0),
+
+                    "schools": school_map.get(product.id, [])
 
                 })
 
-
-            return jsonify(result), 200
-
+            return jsonify({
+                "success": True,
+                "data": result
+            }), 200
 
         except Exception as e:
 
             print("SELLER INVENTORY ERROR:", str(e))
 
             return jsonify({
+                "success": False,
                 "error": "Failed to load inventory",
                 "details": str(e)
             }), 500
