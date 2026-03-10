@@ -105,6 +105,7 @@ class Seller(db.Model):
     users = db.relationship("User", backref="seller_info", lazy=True)
     inventory = db.relationship("SellerInventory", backref="seller", cascade="all, delete-orphan", lazy=True)
     shipments = db.relationship("Shipment", backref="from_seller", lazy=True)
+    orders = db.relationship("OrderItem", backref="seller_orders", lazy=True)
 
 
 # ================= SCHOOL =================
@@ -419,8 +420,17 @@ class OrderItem(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
 
-    order_id = db.Column(db.Integer, db.ForeignKey("orders.id"), nullable=False)
-    product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False)
+    order_id = db.Column(
+        db.Integer,
+        db.ForeignKey("orders.id"),
+        nullable=False
+    )
+
+    product_id = db.Column(
+        db.Integer,
+        db.ForeignKey("products.id"),
+        nullable=False
+    )
 
     size_id = db.Column(
         db.Integer,
@@ -428,10 +438,22 @@ class OrderItem(db.Model):
         nullable=False
     )
 
+    # ⭐ ADD THIS (VERY IMPORTANT)
+    seller_id = db.Column(
+        db.Integer,
+        db.ForeignKey("sellers.id"),
+        nullable=False
+    )
+
     size = db.relationship("ProductSize")
 
+    # ⭐ ADD RELATION
+    seller = db.relationship("Seller")
+
     quantity = db.Column(db.Integer, nullable=False)
+
     unit_price = db.Column(db.Float, default=0.0)
+
     total_price = db.Column(db.Float, default=0.0)
 
 
