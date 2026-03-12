@@ -1,5 +1,6 @@
 import enum
 from datetime import datetime
+
 from flask_sqlalchemy import SQLAlchemy
 from werkzeug.security import check_password_hash, generate_password_hash
 
@@ -136,6 +137,7 @@ class School(db.Model):
 # ================= PRODUCT =================
 
 class Product(db.Model):
+
     __tablename__ = "products"
 
     id = db.Column(db.Integer, primary_key=True)
@@ -143,18 +145,56 @@ class Product(db.Model):
     name = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text)
     sku = db.Column(db.String(100), unique=True, nullable=False)
+
     category = db.Column(db.String(50))
-    unit_price = db.Column(db.Float, default=0.0)
-    image_url = db.Column(db.String(500))
+
+    real_price = db.Column(db.Float, default=0.0)
+    unit_price = db.Column(db.Float, default=0.0)  # discounted price
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
-    sizes = db.relationship("ProductSize", backref="product", cascade="all, delete-orphan", lazy=True)
-    seller_inventory = db.relationship("SellerInventory", backref="product", lazy=True)
-    school_inventory = db.relationship("SchoolInventory", backref="product", lazy=True)
-    shipment_items = db.relationship("ShipmentItem", backref="product", lazy=True)
-    order_items = db.relationship("OrderItem", backref="product", lazy=True)
+    # ===============================
+    # RELATIONSHIPS
+    # ===============================
 
+    sizes = db.relationship(
+        "ProductSize",
+        backref="product",
+        cascade="all, delete-orphan",
+        lazy=True
+    )
+
+    seller_inventory = db.relationship(
+        "SellerInventory",
+        backref="product",
+        lazy=True
+    )
+
+    school_inventory = db.relationship(
+        "SchoolInventory",
+        backref="product",
+        lazy=True
+    )
+
+    shipment_items = db.relationship(
+        "ShipmentItem",
+        backref="product",
+        lazy=True
+    )
+
+    order_items = db.relationship(
+        "OrderItem",
+        backref="product",
+        lazy=True
+    )
+
+    # ⭐ FIXED IMAGE RELATIONSHIP
+    images = db.relationship(
+        "ProductImage",
+        back_populates="product",
+        cascade="all, delete-orphan",
+        lazy=True
+    )
 
 # ================= INVENTORY =================
 
@@ -308,7 +348,7 @@ class SchoolInventory(db.Model):
 
         self.quantity = (self.quantity or 0) + qty
         self.total_received = (self.total_received or 0) + qty
-        self.last_restocked_at = datetime.utcnow()
+        self.last_restocked_at = datetime.now(timezone.utc)
 
     def sell_stock(self, qty: int):
         if qty <= 0:
@@ -568,18 +608,33 @@ class AdminDispatchInstruction(db.Model):
     completed_at = db.Column(db.DateTime)
     
 class ProductImage(db.Model):
+
     __tablename__ = "product_images"
 
     id = db.Column(db.Integer, primary_key=True)
 
-    product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False)
-    school_id = db.Column(db.Integer, db.ForeignKey("schools.id"), nullable=True)
+    product_id = db.Column(
+        db.Integer,
+        db.ForeignKey("products.id"),
+        nullable=False
+    )
 
-    image_url = db.Column(db.String(255), nullable=False)
+    school_id = db.Column(
+        db.Integer,
+        db.ForeignKey("schools.id"),
+        nullable=True
+    )
+
+    image_url = db.Column(db.String(500), nullable=False)
+
     display_order = db.Column(db.Integer, default=1)
 
-    product = db.relationship("Product", backref="images")
-    school = db.relationship("School")
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    product = db.relationship(
+        "Product",
+        back_populates="images"
+    )
     
 class SellerSchoolProduct(db.Model):
     __tablename__ = "seller_school_products"
@@ -627,6 +682,7 @@ class SellerSchoolProduct(db.Model):
 # ================= INVENTORY LEDGER =================
 from datetime import datetime, timezone
 
+
 class InventoryLedger(db.Model):
 
     __tablename__ = "inventory_ledger"
@@ -658,3 +714,145 @@ class InventoryLedger(db.Model):
     )
 
     size = db.relationship("ProductSize")
+    
+
+from datetime import datetime
+
+from sqlalchemy import CheckConstraint
+
+
+class SchoolStockRequest(db.Model):
+
+    __tablename__ = "school_stock_requests"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    # ====================================
+    # RELATIONS
+    # ====================================
+
+    school_id = db.Column(
+        db.Integer,
+        db.ForeignKey("schools.id"),
+        nullable=False
+    )
+
+    seller_id = db.Column(
+        db.Integer,
+        db.ForeignKey("sellers.id"),
+        nullable=False
+    )
+
+    product_id = db.Column(
+        db.Integer,
+        db.ForeignKey("products.id"),
+        nullable=False
+    )
+
+    size_id = db.Column(
+        db.Integer,
+        db.ForeignKey("product_sizes.id"),
+        nullable=True
+    )
+
+    # ====================================
+    # REQUEST DETAILS
+    # ====================================
+
+    quantity = db.Column(
+        db.Integer,
+        nullable=False
+    )
+
+    # SCHOOL_TO_SELLER or SELLER_TO_SCHOOL
+    request_type = db.Column(
+        db.String(30),
+        nullable=False
+    )
+
+    # PENDING / APPROVED / REJECTED / SHIPPED / RECEIVED
+    status = db.Column(
+        db.String(20),
+        default="PENDING"
+    )
+
+    created_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow
+    )
+
+    approved_at = db.Column(
+        db.DateTime
+    )
+
+    shipped_at = db.Column(
+        db.DateTime
+    )
+
+    received_at = db.Column(
+        db.DateTime
+    )
+
+    # ====================================
+    # RELATIONSHIPS
+    # ====================================
+
+    school = db.relationship(
+        "School",
+        backref="stock_requests"
+    )
+
+    seller = db.relationship(
+        "Seller",
+        backref="stock_requests"
+    )
+
+    product = db.relationship(
+        "Product"
+    )
+
+    size = db.relationship(
+        "ProductSize"
+    )
+
+    # ====================================
+    # VALIDATION
+    # ====================================
+
+    __table_args__ = (
+
+        CheckConstraint(
+            "quantity > 0",
+            name="check_stock_request_quantity_positive"
+        ),
+
+    )
+
+    # ====================================
+    # HELPER METHOD
+    # ====================================
+
+    def to_dict(self):
+
+        return {
+            "request_id": self.id,
+            "school_id": self.school_id,
+            "seller_id": self.seller_id,
+            "product_id": self.product_id,
+            "size_id": self.size_id,
+            "quantity": self.quantity,
+            "request_type": self.request_type,
+            "status": self.status,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+            "approved_at": self.approved_at.isoformat() if self.approved_at else None,
+            "shipped_at": self.shipped_at.isoformat() if self.shipped_at else None,
+            "received_at": self.received_at.isoformat() if self.received_at else None,
+        }
+        
+class StockRequestStatus(enum.Enum):
+
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    SHIPPED = "SHIPPED"
+    RECEIVED = "RECEIVED"
