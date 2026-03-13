@@ -584,7 +584,7 @@ def create_app():
             # ===============================
 
             seller_ids = request.form.getlist("seller_ids[]")
-            school_ids = request.form.getlist("school_ids[]")
+            school_ids = [s.id for s in School.query.all()]
 
             # If no school selected → assign to all schools
             if not school_ids:
@@ -851,30 +851,70 @@ def create_app():
                 School.name.label("school_name"),
                 Seller.name.label("seller_name"),
                 Product.name.label("product_name"),
+                Product.unit_price.label("product_price"),
+                Product.real_price.label("product_real_price"),
                 ProductSize.size.label("size"),
+                ProductSize.discounted_price.label("size_discount_price"),
+                ProductSize.real_price.label("size_real_price"),
                 db.func.sum(SchoolInventory.quantity).label("school_stock"),
             )
             .join(Product, Product.id == SchoolInventory.product_id)
             .join(ProductSize, ProductSize.id == SchoolInventory.size_id)
             .join(School, School.id == SchoolInventory.school_id)
-            .outerjoin(SellerSchoolProduct, SellerSchoolProduct.product_id == Product.id)
-            .outerjoin(Seller, Seller.id == SellerSchoolProduct.seller_id)
-            .group_by(School.name, Seller.name, Product.name, ProductSize.size)
+            .outerjoin(
+                SellerSchoolProduct,
+                SellerSchoolProduct.product_id == Product.id
+            )
+            .outerjoin(
+                Seller,
+                Seller.id == SellerSchoolProduct.seller_id
+            )
+            .group_by(
+                School.name,
+                Seller.name,
+                Product.name,
+                Product.unit_price,
+                Product.real_price,
+                ProductSize.size,
+                ProductSize.discounted_price,
+                ProductSize.real_price
+            )
+            .order_by(
+                School.name,
+                Seller.name,
+                Product.name
+            )
             .all()
         )
 
         data = []
 
         for r in rows:
+
+            # ===== PRICE LOGIC =====
+            if r.size_discount_price and r.size_discount_price > 0:
+                price = r.size_discount_price
+            elif r.product_price and r.product_price > 0:
+                price = r.product_price
+            elif r.size_real_price and r.size_real_price > 0:
+                price = r.size_real_price
+            else:
+                price = r.product_real_price or 0
+
+            stock = r.school_stock or 0
+            value = price * stock
+
             data.append({
                 "school": r.school_name,
                 "seller": r.seller_name,
                 "product": r.product_name,
                 "size": r.size,
-                "stock": r.school_stock
+                "price": float(price),
+                "stock": int(stock),
+                "value": float(value)
             })
 
-        return jsonify(data)
+        return jsonify(data), 200
     
     @app.route("/api/admin/dashboard-analytics", methods=["GET"])
     @jwt_required()
@@ -2225,70 +2265,87 @@ def create_app():
 
         user = get_current_user()
 
-        # Load product + size + images in ONE query
-        inventory_items = (
-            SchoolInventory.query
+        print("LOGGED SCHOOL ID:", user.school_id)
+
+        products = (
+            Product.query
+            .join(
+                SellerSchoolProduct,
+                (SellerSchoolProduct.product_id == Product.id) &
+                (SellerSchoolProduct.school_id == user.school_id)
+            )
             .options(
-                joinedload(SchoolInventory.product).joinedload(Product.images),
-                joinedload(SchoolInventory.size)
+                joinedload(Product.images),
+                joinedload(Product.sizes)
             )
-            .filter(
-                SchoolInventory.school_id == user.school_id,
-                SchoolInventory.category == CategoryType.STUDENT
-            )
+            .distinct()
             .all()
         )
 
         result = []
-
         base_url = request.host_url.rstrip("/")
 
-        for inv in inventory_items:
+        for product in products:
 
-            product = inv.product
+            sizes = product.sizes or []
 
-            if not product:
-                continue
+            for size in sizes:
 
-            # ---------- LOAD IMAGES ----------
-            images = []
+                inv = SchoolInventory.query.filter_by(
+                    school_id=user.school_id,
+                    product_id=product.id,
+                    size_id=size.id,
+                    category=CategoryType.STUDENT
+                ).first()
 
-            if product.images:
+                quantity = inv.quantity if inv else 0
 
-                sorted_images = sorted(
-                    product.images,
-                    key=lambda x: x.display_order if x.display_order else 0
+                # ✅ SIZE PRICE PRIORITY
+                real_price = size.real_price if size.real_price else product.real_price
+                discounted_price = (
+                    size.discounted_price if size.discounted_price else product.unit_price
                 )
 
-                for img in sorted_images:
+                images = []
 
-                    if not img.image_url:
-                        continue
+                if product.images:
 
-                    # Convert relative path to full URL
-                    if img.image_url.startswith("http"):
-                        images.append(img.image_url)
-                    else:
-                        images.append(f"{base_url}{img.image_url}")
+                    sorted_images = sorted(
+                        product.images,
+                        key=lambda x: x.display_order or 0
+                    )
 
-            # ---------- BUILD RESPONSE ----------
-            result.append({
-                "inventory_id": inv.id,
-                "product_id": product.id,
-                "size_id": inv.size_id,
+                    for img in sorted_images:
 
-                "product_name": product.name,
-                "description": product.description,
-                "category": inv.category.value,
+                        if not img.image_url:
+                            continue
 
-                "real_price": product.real_price,
-                "discounted_price": product.unit_price,
+                        if img.image_url.startswith("http"):
+                            images.append(img.image_url)
+                        else:
+                            images.append(f"{base_url}{img.image_url}")
 
-                "size": inv.size.size if inv.size else "Standard",
-                "quantity": inv.quantity,
+                result.append({
+                    "inventory_id": inv.id if inv else None,
+                    "product_id": product.id,
+                    "size_id": size.id,
 
-                "images": images
-            })
+                    "product_name": product.name,
+                    "description": product.description,
+
+                    "category": "student",
+
+                    # ✅ UPDATED PRICES
+                    "real_price": real_price,
+                    "discounted_price": discounted_price,
+
+                    "size": size.size,
+                    "quantity": quantity,
+
+                    "images": images
+                })
+
+        print("PRODUCTS RETURNED:", len(result))
 
         return jsonify(result), 200
     
@@ -4918,6 +4975,45 @@ def create_app():
             }
         )
         
+    @app.route("/api/admin/schools/<int:school_id>", methods=["DELETE"])
+    @jwt_required()
+    @role_required(UserRole.SUPER_ADMIN)
+    def delete_school(school_id):
+
+        try:
+
+            school = School.query.get(school_id)
+
+            if not school:
+                return jsonify({"error": "School not found"}), 404
+
+            # delete user account
+            User.query.filter_by(school_id=school_id).delete()
+
+            # delete school inventory
+            SchoolInventory.query.filter_by(school_id=school_id).delete()
+
+            # delete school product mappings
+            SellerSchoolProduct.query.filter_by(school_id=school_id).delete()
+
+            db.session.delete(school)
+
+            db.session.commit()
+
+            return jsonify({
+                "success": True,
+                "message": "School deleted successfully"
+            }), 200
+
+        except Exception as e:
+
+            db.session.rollback()
+
+            return jsonify({
+                "error": "Failed to delete school",
+                "details": str(e)
+            }), 500
+        
     @app.route('/api/admin/schools/<int:school_id>', methods=['PUT'])
     @jwt_required()
     @role_required(UserRole.SUPER_ADMIN)
@@ -5056,50 +5152,40 @@ def create_app():
     @role_required(UserRole.SUPER_ADMIN)
     def delete_seller(seller_id):
 
-        seller = Seller.query.get(seller_id)
-
-        if not seller:
-            return error_response("Seller not found", 404)
-
         try:
-            # 🔥 Delete linked user first (if exists)
-            user = User.query.filter_by(seller_id=seller.id).first()
 
-            if user:
-                db.session.delete(user)
+            seller = Seller.query.get(seller_id)
 
-            # 🔥 Optional: Prevent deletion if seller has inventory
-            inventory_exists = SellerInventory.query.filter_by(
-                seller_id=seller.id
-            ).first()
+            if not seller:
+                return jsonify({"error": "Seller not found"}), 404
 
-            if inventory_exists:
-                return error_response(
-                    "Cannot delete seller with allocated inventory",
-                    400
-                )
+            # delete linked user
+            db.session.query(User).filter_by(seller_id=seller_id).delete()
 
-            # 🔥 Optional: Prevent deletion if dispatch history exists
-            dispatch_exists = AdminDispatchInstruction.query.filter_by(
-                seller_id=seller.id
-            ).first()
+            # delete inventory
+            db.session.query(SellerInventory).filter_by(seller_id=seller_id).delete()
 
-            if dispatch_exists:
-                return error_response(
-                    "Cannot delete seller with dispatch history",
-                    400
-                )
+            # delete school-product mapping
+            db.session.query(SellerSchoolProduct).filter_by(seller_id=seller_id).delete()
 
+            # delete seller
             db.session.delete(seller)
+
             db.session.commit()
 
-            return success_response(
-                message="Seller deleted successfully"
-            )
+            return jsonify({
+                "success": True,
+                "message": "Seller deleted successfully"
+            }), 200
 
         except Exception as e:
+
             db.session.rollback()
-            return error_response(str(e), 500)
+
+            return jsonify({
+                "error": "Failed to delete seller",
+                "details": str(e)
+            }), 500
 
     UPLOAD_FOLDER = "static/uploads"
     os.makedirs(UPLOAD_FOLDER, exist_ok=True)
@@ -5109,7 +5195,9 @@ def create_app():
     @role_required(UserRole.SUPER_ADMIN)
     def manage_products():
 
-        # ================= CREATE PRODUCT =================
+        # =========================================================
+        # CREATE PRODUCT
+        # =========================================================
         if request.method == 'POST':
 
             try:
@@ -5119,20 +5207,38 @@ def create_app():
                 if is_multipart:
 
                     data = request.form
+
                     seller_ids = request.form.getlist("seller_ids[]")
                     school_ids = request.form.getlist("school_ids[]")
+
+                    # If admin selects "ALL SCHOOLS"
+                    if not school_ids or "ALL" in school_ids:
+                        school_ids = [s.id for s in School.query.all()]
+                    else:
+                        school_ids = [int(sid) for sid in school_ids]
+
                     files = request.files.getlist("product_images")
+
+                    size_names = request.form.getlist("sizes[]")
+                    size_real_prices = request.form.getlist("size_real_prices[]")
+                    size_discount_prices = request.form.getlist("size_discount_prices[]")
 
                 else:
 
                     data = request.get_json() or {}
+
                     seller_ids = data.get("seller_ids", [])
                     school_ids = data.get("school_ids", [])
+
                     files = []
+
+                    size_names = data.get("sizes", [])
+                    size_real_prices = data.get("size_real_prices", [])
+                    size_discount_prices = data.get("size_discount_prices", [])
 
                 # ================= VALIDATION =================
 
-                required_fields = ["name", "sku", "category", "discounted_price"]
+                required_fields = ["name", "sku", "category"]
 
                 for field in required_fields:
                     if not data.get(field):
@@ -5141,17 +5247,30 @@ def create_app():
                 if not seller_ids:
                     return jsonify({"error": "At least one seller required"}), 400
 
-                if not school_ids:
-                    return jsonify({"error": "At least one school required"}), 400
-
                 if Product.query.filter_by(sku=data["sku"]).first():
                     return jsonify({"error": "SKU already exists"}), 400
 
-                real_price = float(data.get("real_price") or 0)
-                discounted_price = float(data["discounted_price"])
 
-                if discounted_price <= 0:
-                    return jsonify({"error": "Discounted price must be greater than 0"}), 400
+                # ================= PRICE =================
+
+                real_price = float(data.get("real_price") or 0)
+                discounted_price = float(data.get("discounted_price") or 0)
+
+
+                # ================= PROCESS IDS =================
+
+                seller_ids = [int(s) for s in seller_ids]
+
+                if school_ids:
+
+                    if "ALL" in school_ids:
+                        school_ids = [s.id for s in School.query.all()]
+                    else:
+                        school_ids = [int(s) for s in school_ids]
+
+                else:
+                    school_ids = [s.id for s in School.query.all()]
+
 
                 # ================= CREATE PRODUCT =================
 
@@ -5167,14 +5286,17 @@ def create_app():
                 db.session.add(product)
                 db.session.flush()
 
-                # ================= IMAGE UPLOAD =================
+
+                # =========================================================
+                # IMAGE UPLOAD
+                # =========================================================
 
                 upload_folder = os.path.join("static", "uploads")
                 os.makedirs(upload_folder, exist_ok=True)
 
                 for file in files:
 
-                    if not file:
+                    if not file or not file.filename:
                         continue
 
                     filename = secure_filename(file.filename)
@@ -5190,26 +5312,108 @@ def create_app():
                         )
                     )
 
-                # ================= VALIDATE SELLERS =================
+
+                # =========================================================
+                # CREATE SIZES
+                # =========================================================
+
+                sizes = []
+
+                if size_names:
+
+                    for i, s_name in enumerate(size_names):
+
+                        if not s_name:
+                            continue
+
+                        rp = float(size_real_prices[i]) if i < len(size_real_prices) else 0
+                        dp = float(size_discount_prices[i]) if i < len(size_discount_prices) else 0
+
+                        size = ProductSize(
+                            product_id=product.id,
+                            size=s_name,
+                            quantity=0,
+                            real_price=rp,
+                            discounted_price=dp
+                        )
+
+                        db.session.add(size)
+                        db.session.flush()
+
+                        sizes.append(size)
+
+                else:
+
+                    size = ProductSize(
+                        product_id=product.id,
+                        size="Standard",
+                        quantity=0,
+                        real_price=real_price,
+                        discounted_price=discounted_price
+                    )
+
+                    db.session.add(size)
+                    db.session.flush()
+
+                    sizes.append(size)
+
+
+                # =========================================================
+                # CREATE SCHOOL INVENTORY
+                # =========================================================
+
+                for school_id in school_ids:
+
+                    for s in sizes:
+
+                        existing = SchoolInventory.query.filter_by(
+                            school_id=school_id,
+                            product_id=product.id,
+                            size_id=s.id,
+                            category=CategoryType.STUDENT
+                        ).first()
+
+                        if not existing:
+
+                            db.session.add(
+                                SchoolInventory(
+                                    school_id=school_id,
+                                    product_id=product.id,
+                                    size_id=s.id,
+                                    category=CategoryType.STUDENT,
+                                    quantity=0,
+                                    low_stock_threshold=10
+                                )
+                            )
+
+
+                # =========================================================
+                # CREATE SELLER INVENTORY
+                # =========================================================
 
                 for seller_id in seller_ids:
 
-                    seller_id = int(seller_id)
+                    for s in sizes:
 
-                    seller = db.session.get(Seller, seller_id)
+                        db.session.add(
+                            SellerInventory(
+                                seller_id=seller_id,
+                                product_id=product.id,
+                                size_id=s.id,
+                                total_allocated=0,
+                                sent_stock=0,
+                                remaining_stock=0
+                            )
+                        )
 
-                    if not seller:
-                        return jsonify({"error": f"Seller {seller_id} not found"}), 404
 
-                # ================= MAP SELLER SCHOOL PRODUCT =================
+                # =========================================================
+                # MAP SELLER SCHOOL PRODUCT
+                # =========================================================
 
                 for seller_id in seller_ids:
-
-                    seller_id = int(seller_id)
 
                     for school_id in school_ids:
-
-                        school_id = int(school_id)
 
                         existing = SellerSchoolProduct.query.filter_by(
                             seller_id=seller_id,
@@ -5227,12 +5431,14 @@ def create_app():
                                 )
                             )
 
+
                 db.session.commit()
 
                 return jsonify({
                     "message": "Product created successfully",
                     "product_id": product.id
                 }), 201
+
 
             except Exception as e:
 
@@ -5246,7 +5452,9 @@ def create_app():
                 }), 500
 
 
-        # ================= GET PRODUCTS =================
+        # =========================================================
+        # GET PRODUCTS
+        # =========================================================
 
         products = Product.query.all()
 
@@ -5255,12 +5463,11 @@ def create_app():
         for p in products:
 
             images = ProductImage.query.filter_by(product_id=p.id).all()
-
-            # ⭐ GET SELLER + SCHOOL MAPPINGS
+            sizes = ProductSize.query.filter_by(product_id=p.id).all()
             mappings = SellerSchoolProduct.query.filter_by(product_id=p.id).all()
 
-            seller_ids = list(set([m.seller_id for m in mappings]))
-            school_ids = list(set([m.school_id for m in mappings]))
+            seller_ids = list({m.seller_id for m in mappings})
+            school_ids = list({m.school_id for m in mappings})
 
             response.append({
                 "id": p.id,
@@ -5270,12 +5477,22 @@ def create_app():
                 "description": p.description,
                 "real_price": p.real_price,
                 "discounted_price": float(p.unit_price or 0),
+
+                "sizes": [
+                    {
+                        "id": s.id,
+                        "size": s.size,
+                        "real_price": s.real_price,
+                        "discounted_price": s.discounted_price
+                    }
+                    for s in sizes
+                ],
+
                 "images": [
                     request.host_url.rstrip("/") + img.image_url
                     for img in images
                 ],
 
-                # ⭐ ADDED FOR EDIT PREFILL
                 "allocations": [
                     {"seller_id": sid}
                     for sid in seller_ids
@@ -5706,46 +5923,49 @@ def create_app():
 
             return jsonify({
                 "error": str(e)
-            }), 500    
+            }), 500
         
-    @app.route('/api/admin/products/<int:product_id>', methods=['DELETE'])
+    @app.route("/api/admin/products/<int:product_id>", methods=["DELETE"])
     @jwt_required()
     @role_required(UserRole.SUPER_ADMIN)
     def delete_product(product_id):
 
         try:
 
-            product = Product.query.get(product_id)
+            product = db.session.get(Product, product_id)
 
             if not product:
-                return jsonify({"error": "Product not found"}), 404
+                return jsonify({
+                    "success": False,
+                    "message": "Product not found"
+                }), 404
 
-            # delete images
-            ProductImage.query.filter_by(product_id=product_id).delete()
-
-            # delete seller-school mappings
-            SellerSchoolProduct.query.filter_by(product_id=product_id).delete()
-
-            # delete product sizes if exist
-            ProductSize.query.filter_by(product_id=product_id).delete()
-
-            # delete inventories
+            # DELETE DEPENDENT DATA FIRST
             SellerInventory.query.filter_by(product_id=product_id).delete()
             SchoolInventory.query.filter_by(product_id=product_id).delete()
+            SellerSchoolProduct.query.filter_by(product_id=product_id).delete()
+            ShipmentItem.query.filter_by(product_id=product_id).delete()
+            OrderItem.query.filter_by(product_id=product_id).delete()
 
+            # delete product
             db.session.delete(product)
 
             db.session.commit()
 
-            return jsonify({"message": "Product deleted successfully"}), 200
+            return jsonify({
+                "success": True,
+                "message": "Product deleted successfully"
+            }), 200
 
         except Exception as e:
 
             db.session.rollback()
 
+            print("DELETE ERROR:", str(e))
+
             return jsonify({
-                "error": "Failed to delete product",
-                "details": str(e)
+                "success": False,
+                "message": str(e)
             }), 500
         
             
@@ -7641,8 +7861,7 @@ def create_app():
 
             inventory_items = SchoolInventory.query.filter(
                 SchoolInventory.school_id == user.school_id,
-                SchoolInventory.category == CategoryType.STUDENT,
-                SchoolInventory.quantity > 0
+                SchoolInventory.category == CategoryType.STUDENT
             ).all()
 
             products = []
@@ -7651,6 +7870,9 @@ def create_app():
 
                 product = item.product
                 size = item.size
+
+                if not product:
+                    continue
 
                 # Collect product images
                 images = [

@@ -149,7 +149,7 @@ class Product(db.Model):
     category = db.Column(db.String(50))
 
     real_price = db.Column(db.Float, default=0.0)
-    unit_price = db.Column(db.Float, default=0.0)  # discounted price
+    unit_price = db.Column(db.Float, default=0.0)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -167,28 +167,31 @@ class Product(db.Model):
     seller_inventory = db.relationship(
         "SellerInventory",
         backref="product",
+        cascade="all, delete-orphan",   # ✅ ADD THIS
         lazy=True
     )
 
     school_inventory = db.relationship(
         "SchoolInventory",
         backref="product",
+        cascade="all, delete-orphan",   # ✅ ADD THIS
         lazy=True
     )
 
     shipment_items = db.relationship(
         "ShipmentItem",
         backref="product",
+        cascade="all, delete-orphan",   # ✅ ADD THIS
         lazy=True
     )
 
     order_items = db.relationship(
         "OrderItem",
         backref="product",
+        cascade="all, delete-orphan",   # ✅ ADD THIS
         lazy=True
     )
 
-    # ⭐ FIXED IMAGE RELATIONSHIP
     images = db.relationship(
         "ProductImage",
         back_populates="product",
@@ -551,15 +554,24 @@ class StaffOrderItem(db.Model):
 # ================= PRODUCT SIZE =================
 
 class ProductSize(db.Model):
+
     __tablename__ = "product_sizes"
 
     id = db.Column(db.Integer, primary_key=True)
-    product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=False)
+
+    product_id = db.Column(
+        db.Integer,
+        db.ForeignKey("products.id"),
+        nullable=False
+    )
 
     size = db.Column(db.String(50), nullable=False)
+
     quantity = db.Column(db.Integer, default=0)
 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # NEW
+    real_price = db.Column(db.Float, default=0.0)
+    discounted_price = db.Column(db.Float, default=0.0)
 
 
 # ================= AUDIT LOG =================
