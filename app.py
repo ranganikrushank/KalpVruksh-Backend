@@ -6,6 +6,9 @@ import uuid
 from datetime import datetime, timezone
 from functools import wraps
 
+import cloudinary
+import cloudinary.uploader
+
 import razorpay
 from flask import (Flask, jsonify, redirect, render_template, request, session,
                    url_for)
@@ -13,7 +16,8 @@ from flask_cors import CORS  # Add if needed for frontend
 from flask_jwt_extended import (JWTManager, create_access_token,
                                 get_jwt_identity, jwt_required,
                                 unset_jwt_cookies)
-from werkzeug.utils import secure_filename
+from dotenv import load_dotenv
+load_dotenv()
 
 from auth import login, register_user, role_required
 from config import Config
@@ -109,7 +113,17 @@ def create_app():
     app = Flask(__name__, static_folder="static", static_url_path="/static")
 
     app.config.from_object(Config)
+    
+    cloudinary.config(
+        cloud_name=os.getenv("CLOUDINARY_CLOUD_NAME"),
+        api_key=os.getenv("CLOUDINARY_API_KEY"),
+        api_secret=os.getenv("CLOUDINARY_API_SECRET")
+    )
 
+    print("CLOUDINARY CONFIG:")
+    print("CLOUD NAME:", os.getenv("CLOUDINARY_CLOUD_NAME"))
+    print("API KEY:", os.getenv("CLOUDINARY_API_KEY"))
+    print("API SECRET:", os.getenv("CLOUDINARY_API_SECRET"))
     # ✅ ENABLE CORS FOR FRONTEND
     CORS(
         app,
@@ -117,7 +131,7 @@ def create_app():
         supports_credentials=True
     )
     
-    app.secret_key = "super-secret-key"
+    app.secret_key = os.environ.get("SECRET_KEY", "super-secret-key")
     
     db.init_app(app)
     jwt = JWTManager(app)
@@ -127,17 +141,10 @@ def create_app():
         os.getenv("RAZORPAY_KEY_SECRET")
     ))
     
-    app.config['UPLOAD_FOLDER'] = os.path.join(
-        app.root_path,
-        "static",
-        "uploads",
-        "products"
-    )
     app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024
 
     with app.app_context():
         db.create_all()
-
         try:
             admin = User.query.filter_by(role=UserRole.SUPER_ADMIN).first()
 
@@ -184,6 +191,16 @@ def create_app():
         )
         db.session.add(audit)
     
+    @app.route("/check-db")
+    def check_db():
+        from sqlalchemy import text
+        
+        result = db.session.execute(text(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema='public'"
+        ))
+        
+        tables = [row[0] for row in result]
+        return {"tables": tables}
     @app.route("/api/whoami", methods=["GET"])
     @jwt_required()
     def whoami():
@@ -228,13 +245,6 @@ def create_app():
         session.clear()
         return redirect('/login')
     
-    @app.route('/static/uploads/<filename>')
-    def serve_product_image(filename):
-        from flask import send_from_directory
-        return send_from_directory(
-            os.path.join(app.root_path, "static/uploads"),
-            filename
-        )
     @app.route('/admin/dashboard')
     @session_login_required(UserRole.SUPER_ADMIN)
     def admin_dashboard():
@@ -547,32 +557,36 @@ def create_app():
                 if len(images) > 5:
                     return "Maximum 5 images allowed per product", 400
 
-                upload_folder = app.config.get(
-                    'UPLOAD_FOLDER',
-                    'static/uploads/products'
-                )
-
-                if not os.path.exists(upload_folder):
-                    os.makedirs(upload_folder)
-
                 for index, image in enumerate(images):
+                    
+                    if image.content_length and image.content_length > 5 * 1024 * 1024:
+                        return "Image too large (max 5MB)", 400
 
-                    # Secure filename
                     original_filename = image.filename
                     extension = original_filename.split('.')[-1].lower()
 
                     if extension not in ['jpg', 'jpeg', 'png', 'webp']:
                         return "Only image files are allowed", 400
 
-                    filename = f"{product.id}_{index+1}.{extension}"
-                    filepath = os.path.join(upload_folder, filename)
+                    upload_result = cloudinary.uploader.upload(
+                        image,
+                        folder="products",
+                        transformation=[
+                            {"width": 800, "height": 800, "crop": "limit"},
+                            {"quality": "auto"},
+                            {"fetch_format": "auto"}
+                        ]
+                    )
 
-                    image.save(filepath)
+                    image_url = upload_result.get("secure_url")
+
+                    if not image_url:
+                        return "Image upload failed", 500
 
                     image_entry = ProductImage(
                         product_id=product.id,
                         school_id=int(school_visibility) if school_visibility else None,
-                        image_url=f"/static/uploads/{filename}",
+                        image_url=image_url,
                         display_order=index + 1
                     )
 
@@ -618,8 +632,18 @@ def create_app():
                         )
 
             # ===============================
-            # CREATE SCHOOL INVENTORY
+            # CREATE SCHOOL INVENTORY (FIXED)
             # ===============================
+
+            # 🔹 Handle category safely
+            if category.lower() == "both":
+                categories = [CategoryType.STUDENT, CategoryType.STAFF]
+            else:
+                try:
+                    categories = [CategoryType(category.lower())]
+                except ValueError:
+                    return jsonify({"error": f"Invalid category: {category}"}), 400
+
 
             for school_id in school_ids:
 
@@ -627,25 +651,27 @@ def create_app():
 
                 for size in sizes:
 
-                    existing = SchoolInventory.query.filter_by(
-                        school_id=school_id,
-                        product_id=product.id,
-                        size_id=size.id,
-                        category=CategoryType(category.upper())
-                    ).first()
+                    for cat in categories:
 
-                    if not existing:
+                        existing = SchoolInventory.query.filter_by(
+                            school_id=school_id,
+                            product_id=product.id,
+                            size_id=size.id,
+                            category=cat
+                        ).first()
 
-                        db.session.add(
-                            SchoolInventory(
-                                school_id=school_id,
-                                product_id=product.id,
-                                size_id=size.id,
-                                category=CategoryType.STUDENT,
-                                quantity=0,
-                                low_stock_threshold=10
+                        if not existing:
+
+                            db.session.add(
+                                SchoolInventory(
+                                    school_id=school_id,
+                                    product_id=product.id,
+                                    size_id=size.id,
+                                    category=cat,
+                                    quantity=0,
+                                    low_stock_threshold=10
+                                )
                             )
-                        )
 
             # ===============================
             # MAP SELLER SCHOOL PRODUCT
@@ -1522,10 +1548,10 @@ def create_app():
             # ===============================
 
             # DEBUG BLOCK (Keep during development)
-            print("---- DISPATCH DEBUG ----")
+            # print("---- DISPATCH DEBUG ----")
             print("Requested seller_id:", seller_id)
             print("Requested product_id:", product_id)
-            print("DB URI:", app.config['SQLALCHEMY_DATABASE_URI'])
+            # print("DB URI:", app.config['SQLALCHEMY_DATABASE_URI'])
 
             all_inventory = SellerInventory.query.all()
             print("Total SellerInventory rows:", len(all_inventory))
@@ -1826,15 +1852,15 @@ def create_app():
 
         import calendar
 
-        from sqlalchemy import func
+        from sqlalchemy import func, extract
 
         monthly_data = db.session.query(
-            func.strftime("%m", Order.created_at),
-            func.sum(Order.total_amount)
+            extract('month', Order.created_at),
+            db.func.sum(Order.total_amount)
         ).filter(
             Order.payment_status == "PAID"
         ).group_by(
-            func.strftime("%m", Order.created_at)
+            extract('month', Order.created_at)
         ).all()
 
         labels = [calendar.month_abbr[int(row[0])] for row in monthly_data]
@@ -1844,8 +1870,6 @@ def create_app():
             "labels": labels,
             "data": values
         })
-
-    client = razorpay.Client(auth=("RAZORPAY_KEY_ID", "RAZORPAY_SECRET"))
 
     @app.route("/api/student/create-order", methods=["POST"])
     @jwt_required()
@@ -1950,7 +1974,7 @@ def create_app():
             # LIVE MODE (RAZORPAY)
             # ===============================
 
-            razorpay_order = client.order.create({
+            razorpay_order = razorpay_client.order.create({
                 "amount": razorpay_amount,
                 "currency": "INR",
                 "payment_capture": 1
@@ -2282,7 +2306,7 @@ def create_app():
         )
 
         result = []
-        base_url = request.host_url.rstrip("/")
+        # base_url = request.host_url.rstrip("/")
 
         for product in products:
 
@@ -2290,6 +2314,7 @@ def create_app():
 
             # Prepare images once per product
             images = []
+
             if product.images:
                 sorted_images = sorted(
                     product.images,
@@ -2297,13 +2322,12 @@ def create_app():
                 )
 
                 for img in sorted_images:
-                    if not img.image_url:
-                        continue
-
-                    if img.image_url.startswith("http"):
+                    if img.image_url:
                         images.append(img.image_url)
-                    else:
-                        images.append(f"{base_url}{img.image_url}")
+
+            # fallback if no images
+            if not images:
+                images = []
 
             for size in sizes:
 
@@ -4393,20 +4417,34 @@ def create_app():
     @app.route('/api/app/login', methods=['POST', 'OPTIONS'])
     def app_login():
 
+        # ✅ Handle CORS preflight properly
         if request.method == "OPTIONS":
-            return jsonify({"status": "ok"}), 200
+            response = jsonify({"status": "ok"})
+            response.headers.add("Access-Control-Allow-Origin", "*")
+            response.headers.add("Access-Control-Allow-Headers", "Content-Type,Authorization")
+            response.headers.add("Access-Control-Allow-Methods", "POST,OPTIONS")
+            return response, 200
 
         try:
+            # ===============================
+            # SAFE JSON PARSING
+            # ===============================
+            data = request.get_json(silent=True)
 
-            data = request.get_json() or {}
+            if not data:
+                return jsonify({"error": "Invalid JSON body"}), 400
 
-            identifier = data.get("identifier")
-            password = data.get("password")
+            identifier = str(data.get("identifier", "")).strip()
+            password = str(data.get("password", "")).strip()
 
             if not identifier or not password:
                 return jsonify({"error": "Identifier and password required"}), 400
 
-            # detect login type
+            # ===============================
+            # USER LOOKUP (PHONE OR USERNAME)
+            # ===============================
+            user = None
+
             if identifier.isdigit():
                 user = User.query.filter_by(phone_number=identifier).first()
             else:
@@ -4415,17 +4453,39 @@ def create_app():
             if not user:
                 return jsonify({"error": "User not found"}), 404
 
-            if not user.check_password(password):
-                return jsonify({"error": "Invalid password"}), 401
+            # ===============================
+            # PASSWORD CHECK (SAFE)
+            # ===============================
+            try:
+                if not user.check_password(password):
+                    return jsonify({"error": "Invalid password"}), 401
+            except Exception as e:
+                print("PASSWORD CHECK ERROR:", str(e))
+                return jsonify({"error": "Password validation failed"}), 500
 
-            if not user.is_active:
+            # ===============================
+            # ACCOUNT STATUS CHECK
+            # ===============================
+            if hasattr(user, "is_active") and not user.is_active:
                 return jsonify({"error": "Account disabled"}), 403
 
-            access_token = create_access_token(
-                identity=str(user.id),
-                additional_claims={"role": user.role.value}
-            )
+            # ===============================
+            # JWT TOKEN CREATION
+            # ===============================
+            try:
+                access_token = create_access_token(
+                    identity=str(user.id),
+                    additional_claims={
+                        "role": user.role.value
+                    }
+                )
+            except Exception as e:
+                print("JWT ERROR:", str(e))
+                return jsonify({"error": "Token generation failed"}), 500
 
+            # ===============================
+            # USER DATA RESPONSE
+            # ===============================
             user_data = {
                 "id": user.id,
                 "full_name": user.full_name,
@@ -4436,15 +4496,28 @@ def create_app():
                 "seller_id": user.seller_id
             }
 
-            return jsonify({
+            # ===============================
+            # SUCCESS RESPONSE
+            # ===============================
+            response = jsonify({
+                "success": True,
                 "access_token": access_token,
                 "role": user.role.value,
                 "user": user_data
-            }), 200
+            })
+
+            # ✅ CORS headers (important for web)
+            response.headers.add("Access-Control-Allow-Origin", "*")
+
+            return response, 200
 
         except Exception as e:
-            print("Login error:", str(e))
-            return jsonify({"error": "Login failed"}), 500
+            print("LOGIN ERROR:", str(e))  # 🔥 CRITICAL DEBUG
+
+            return jsonify({
+                "error": "Login failed",
+                "details": str(e)  # 🔥 WILL SHOW REAL ISSUE
+            }), 500
     
     @app.route('/api/student/my-orders', methods=['GET'])
     @jwt_required()
@@ -5194,54 +5267,42 @@ def create_app():
                 "details": str(e)
             }), 500
 
-    UPLOAD_FOLDER = "static/uploads"
-    os.makedirs(UPLOAD_FOLDER, exist_ok=True)
+    # UPLOAD_FOLDER = "static/uploads"
+    # os.makedirs(UPLOAD_FOLDER, exist_ok=True)
     
     @app.route('/api/admin/products', methods=['GET', 'POST'])
     @jwt_required()
     @role_required(UserRole.SUPER_ADMIN)
     def manage_products():
 
+        print("CONTENT TYPE:", request.content_type)
+        print("FILES RECEIVED:", request.files)
+        print("FORM DATA:", request.form)
         # =========================================================
         # CREATE PRODUCT
         # =========================================================
         if request.method == 'POST':
 
             try:
-
-                is_multipart = request.content_type and "multipart/form-data" in request.content_type
-
-                if is_multipart:
-
+                # ✅ FIX: Always support both JSON + FORM
+                if request.content_type and "multipart/form-data" in request.content_type:
                     data = request.form
-
-                    seller_ids = request.form.getlist("seller_ids[]")
-                    school_ids = request.form.getlist("school_ids[]")
-
-                    # If admin selects "ALL SCHOOLS"
-                    if not school_ids or "ALL" in school_ids:
-                        school_ids = [s.id for s in School.query.all()]
-                    else:
-                        school_ids = [int(sid) for sid in school_ids]
-
                     files = request.files.getlist("product_images")
-
-                    size_names = request.form.getlist("sizes[]")
-                    size_real_prices = request.form.getlist("size_real_prices[]")
-                    size_discount_prices = request.form.getlist("size_discount_prices[]")
-
                 else:
-
                     data = request.get_json() or {}
-
-                    seller_ids = data.get("seller_ids", [])
-                    school_ids = data.get("school_ids", [])
-
                     files = []
 
-                    size_names = data.get("sizes", [])
-                    size_real_prices = data.get("size_real_prices", [])
-                    size_discount_prices = data.get("size_discount_prices", [])
+                # ✅ FIX: Always try to read files
+                files = request.files.getlist("product_images")
+
+                print("FILES RECEIVED:", files)
+
+                seller_ids = request.form.getlist("seller_ids[]") if request.form else data.get("seller_ids", [])
+                school_ids = request.form.getlist("school_ids[]") if request.form else data.get("school_ids", [])
+
+                size_names = request.form.getlist("sizes[]") if request.form else data.get("sizes", [])
+                size_real_prices = request.form.getlist("size_real_prices[]") if request.form else data.get("size_real_prices", [])
+                size_discount_prices = request.form.getlist("size_discount_prices[]") if request.form else data.get("size_discount_prices", [])
 
                 # ================= VALIDATION =================
 
@@ -5257,27 +5318,22 @@ def create_app():
                 if Product.query.filter_by(sku=data["sku"]).first():
                     return jsonify({"error": "SKU already exists"}), 400
 
-
                 # ================= PRICE =================
 
                 real_price = float(data.get("real_price") or 0)
                 discounted_price = float(data.get("discounted_price") or 0)
-
 
                 # ================= PROCESS IDS =================
 
                 seller_ids = [int(s) for s in seller_ids]
 
                 if school_ids:
-
                     if "ALL" in school_ids:
                         school_ids = [s.id for s in School.query.all()]
                     else:
                         school_ids = [int(s) for s in school_ids]
-
                 else:
                     school_ids = [s.id for s in School.query.all()]
-
 
                 # ================= CREATE PRODUCT =================
 
@@ -5293,32 +5349,35 @@ def create_app():
                 db.session.add(product)
                 db.session.flush()
 
-
                 # =========================================================
-                # IMAGE UPLOAD
+                # IMAGE UPLOAD (FIXED)
                 # =========================================================
-
-                upload_folder = os.path.join("static", "uploads")
-                os.makedirs(upload_folder, exist_ok=True)
 
                 for file in files:
 
-                    if not file or not file.filename:
+                    if not file or file.filename == "":
                         continue
 
-                    filename = secure_filename(file.filename)
-                    unique_name = f"{uuid.uuid4()}_{filename}"
+                    print("PROCESSING FILE:", file.filename)
 
-                    filepath = os.path.join(upload_folder, unique_name)
-                    file.save(filepath)
+                    upload_result = cloudinary.uploader.upload(
+                        file,
+                        folder="products"
+                    )
+
+                    image_url = upload_result.get("secure_url")
+
+                    print("UPLOADED URL:", image_url)
+
+                    if not image_url:
+                        continue
 
                     db.session.add(
                         ProductImage(
                             product_id=product.id,
-                            image_url=f"/static/uploads/{unique_name}"
+                            image_url=image_url
                         )
                     )
-
 
                 # =========================================================
                 # CREATE SIZES
@@ -5346,7 +5405,6 @@ def create_app():
 
                         db.session.add(size)
                         db.session.flush()
-
                         sizes.append(size)
 
                 else:
@@ -5361,34 +5419,25 @@ def create_app():
 
                     db.session.add(size)
                     db.session.flush()
-
                     sizes.append(size)
-
 
                 # ===============================
                 # CREATE SCHOOL INVENTORY
                 # ===============================
-                
-                category = data.get("category") or request.form.get("category")
+
+                category = data.get("category")
 
                 if category == "both":
                     categories = [CategoryType.STUDENT, CategoryType.STAFF]
-
                 elif category.lower() == "student":
                     categories = [CategoryType.STUDENT]
-
                 elif category.lower() == "staff":
                     categories = [CategoryType.STAFF]
-
                 else:
                     return jsonify({"error": "Invalid category"}), 400
 
                 for school_id in school_ids:
-
-                    school_id = int(school_id)
-
                     for size in sizes:
-
                         for cat in categories:
 
                             existing = SchoolInventory.query.filter_by(
@@ -5399,7 +5448,6 @@ def create_app():
                             ).first()
 
                             if not existing:
-
                                 db.session.add(
                                     SchoolInventory(
                                         school_id=school_id,
@@ -5411,14 +5459,12 @@ def create_app():
                                     )
                                 )
 
-                # =========================================================
+                # ===============================
                 # CREATE SELLER INVENTORY
-                # =========================================================
+                # ===============================
 
                 for seller_id in seller_ids:
-
                     for s in sizes:
-
                         db.session.add(
                             SellerInventory(
                                 seller_id=seller_id,
@@ -5430,13 +5476,11 @@ def create_app():
                             )
                         )
 
-
-                # =========================================================
+                # ===============================
                 # MAP SELLER SCHOOL PRODUCT
-                # =========================================================
+                # ===============================
 
                 for seller_id in seller_ids:
-
                     for school_id in school_ids:
 
                         existing = SellerSchoolProduct.query.filter_by(
@@ -5446,7 +5490,6 @@ def create_app():
                         ).first()
 
                         if not existing:
-
                             db.session.add(
                                 SellerSchoolProduct(
                                     seller_id=seller_id,
@@ -5455,7 +5498,7 @@ def create_app():
                                 )
                             )
 
-
+                # ✅ FINAL COMMIT
                 db.session.commit()
 
                 return jsonify({
@@ -5463,25 +5506,19 @@ def create_app():
                     "product_id": product.id
                 }), 201
 
-
             except Exception as e:
-
                 db.session.rollback()
-
                 print("Product creation error:", str(e))
-
                 return jsonify({
                     "error": "Failed to create product",
                     "details": str(e)
                 }), 500
-
 
         # =========================================================
         # GET PRODUCTS
         # =========================================================
 
         products = Product.query.all()
-
         response = []
 
         for p in products:
@@ -5492,6 +5529,13 @@ def create_app():
 
             seller_ids = list({m.seller_id for m in mappings})
             school_ids = list({m.school_id for m in mappings})
+
+            # ✅ CLEAN IMAGE LIST
+            images_list = [
+                {"image_url": img.image_url}
+                for img in images
+                if img.image_url and img.image_url.startswith("http")
+            ]
 
             response.append({
                 "id": p.id,
@@ -5513,25 +5557,14 @@ def create_app():
                     for s in sizes
                 ],
 
-                "images": [
-                    {
-                        "image_url": request.host_url.rstrip("/") + img.image_url
-                    }
-                    for img in images
-                ],
+                "images": images_list,
 
-                "allocations": [
-                    {"seller_id": sid}
-                    for sid in seller_ids
-                ],
-
-                "schools": [
-                    {"school_id": sid}
-                    for sid in school_ids
-                ]
+                "allocations": [{"seller_id": sid} for sid in seller_ids],
+                "schools": [{"school_id": sid} for sid in school_ids]
             })
 
         return jsonify(response), 200
+
     
     @app.route("/api/seller/dashboard-stats", methods=["GET"])
     @jwt_required()
@@ -5748,7 +5781,7 @@ def create_app():
     @role_required(UserRole.SUPER_ADMIN)
     def update_product(product_id):
 
-        product = Product.query.get(product_id)
+        product = db.session.get(Product, product_id)
 
         if not product:
             return jsonify({"error": "Product not found"}), 404
@@ -5814,7 +5847,11 @@ def create_app():
 
             if size_names:
 
-                ProductSize.query.filter_by(product_id=product_id).delete()
+                existing_sizes = ProductSize.query.filter_by(product_id=product_id).all()
+
+                for size in existing_sizes:
+                    if hasattr(size, "is_active"):
+                        size.is_active = False
 
                 for i, size in enumerate(size_names):
 
@@ -5865,34 +5902,45 @@ def create_app():
 
             sizes = ProductSize.query.filter_by(product_id=product_id).all()
 
-            if product.category:
-                category_enum = CategoryType[product.category.upper()]
+            # ===============================
+            # FIX CATEGORY HANDLING
+            # ===============================
+
+            if product.category and product.category.lower() == "both":
+                categories = [CategoryType.STUDENT, CategoryType.STAFF]
+            elif product.category:
+                try:
+                    categories = [CategoryType(product.category.lower())]
+                except ValueError:
+                    return jsonify({"error": f"Invalid category: {product.category}"}), 400
             else:
-                category_enum = CategoryType.STUDENT
+                categories = [CategoryType.STUDENT]
 
             for school_id in school_ids:
 
                 for size in sizes:
 
-                    existing = SchoolInventory.query.filter_by(
-                        school_id=int(school_id),
-                        product_id=product_id,
-                        size_id=size.id,
-                        category=category_enum
-                    ).first()
+                    for cat in categories:
 
-                    if not existing:
+                        existing = SchoolInventory.query.filter_by(
+                            school_id=int(school_id),
+                            product_id=product_id,
+                            size_id=size.id,
+                            category=cat
+                        ).first()
 
-                        db.session.add(
-                            SchoolInventory(
-                                school_id=int(school_id),
-                                product_id=product_id,
-                                size_id=size.id,
-                                category=category_enum,
-                                quantity=0,
-                                low_stock_threshold=10
+                        if not existing:
+
+                            db.session.add(
+                                SchoolInventory(
+                                    school_id=int(school_id),
+                                    product_id=product_id,
+                                    size_id=size.id,
+                                    category=cat,
+                                    quantity=0,
+                                    low_stock_threshold=10
+                                )
                             )
-                        )
 
             # ===============================
             # UPDATE IMAGES
@@ -7133,32 +7181,61 @@ def create_app():
     @role_required(UserRole.SELLER)
     def seller_upload_image():
 
-        product_id = request.form.get("product_id")
-        file = request.files.get("image")
+        try:
+            product_id = request.form.get("product_id")
+            file = request.files.get("image")
 
-        if not file:
-            return jsonify({"error": "No image uploaded"}), 400
+            if not file:
+                return jsonify({"error": "No image uploaded"}), 400
 
-        filename = secure_filename(file.filename)
-        unique = f"{uuid.uuid4()}_{filename}"
+            if not product_id:
+                return jsonify({"error": "Product ID required"}), 400
 
-        folder = os.path.join("static", "uploads")
-        os.makedirs(folder, exist_ok=True)
+            # 🔒 File type validation
+            extension = file.filename.split('.')[-1].lower()
+            if extension not in ['jpg', 'jpeg', 'png', 'webp']:
+                return jsonify({"error": "Invalid file type"}), 400
 
-        filepath = os.path.join(folder, unique)
-        file.save(filepath)
+            # 🔒 File size validation (5MB)
+            if file.content_length and file.content_length > 5 * 1024 * 1024:
+                return jsonify({"error": "Image too large (max 5MB)"}), 400
 
-        image = ProductImage(
-            product_id=product_id,
-            image_url=f"/static/uploads/{unique}"
-        )
+            # ☁️ Upload to Cloudinary
+            upload_result = cloudinary.uploader.upload(
+                file,
+                folder="products",
+                transformation=[
+                    {"width": 800, "height": 800, "crop": "limit"},
+                    {"quality": "auto"},
+                    {"fetch_format": "auto"}
+                ]
+            )
 
-        db.session.add(image)
-        db.session.commit()
+            image_url = upload_result.get("secure_url")
 
-        return jsonify({
-            "message": "Image uploaded"
-        })
+            if not image_url:
+                return jsonify({"error": "Upload failed"}), 500
+
+            # 💾 Save in DB
+            image = ProductImage(
+                product_id=int(product_id),
+                image_url=image_url
+            )
+
+            db.session.add(image)
+            db.session.commit()
+
+            return jsonify({
+                "message": "Image uploaded successfully",
+                "image_url": image_url
+            }), 200
+
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({
+                "error": "Upload failed",
+                "details": str(e)
+            }), 500
         
     @app.route("/api/seller/delete-image/<int:image_id>", methods=["DELETE"])
     @jwt_required()
