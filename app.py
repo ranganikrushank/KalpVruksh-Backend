@@ -141,7 +141,7 @@ def create_app():
         os.getenv("RAZORPAY_KEY_SECRET")
     ))
     
-    app.config['MAX_CONTENT_LENGTH'] = 5 * 1024 * 1024
+    app.config['MAX_CONTENT_LENGTH'] = 30 * 1024 * 1024
 
     with app.app_context():
         db.create_all()
@@ -5964,32 +5964,56 @@ def create_app():
                             )
 
             # ===============================
-            # UPDATE IMAGES
+            # UPDATE IMAGES (FIXED)
             # ===============================
 
             images = request.files.getlist("product_images")
 
             if images:
 
-                upload_folder = app.config["UPLOAD_FOLDER"]
-                os.makedirs(upload_folder, exist_ok=True)
+                # Remove empty files
+                images = [img for img in images if img and img.filename]
+
+                # 🔥 Get last display order
+                last_image = ProductImage.query.filter_by(product_id=product.id) \
+                    .order_by(ProductImage.display_order.desc()) \
+                    .first()
+
+                start_order = last_image.display_order if last_image else 0
 
                 for index, image in enumerate(images):
 
-                    extension = image.filename.split(".")[-1]
-                    filename = f"{product.id}_{uuid.uuid4().hex}.{extension}"
+                    # 🔥 VALIDATION
+                    extension = image.filename.split('.')[-1].lower()
 
-                    filepath = os.path.join(upload_folder, filename)
+                    if extension not in ['jpg', 'jpeg', 'png', 'webp']:
+                        return jsonify({"error": "Invalid image format"}), 400
 
-                    image.save(filepath)
+                    # 🔥 CLOUDINARY UPLOAD (SAME AS CREATE)
+                    upload_result = cloudinary.uploader.upload(
+                        image,
+                        folder="products",
+                        transformation=[
+                            {"width": 800, "height": 800, "crop": "limit"},
+                            {"quality": "auto"},
+                            {"fetch_format": "auto"}
+                        ]
+                    )
+
+                    image_url = upload_result.get("secure_url")
+
+                    if not image_url:
+                        return jsonify({"error": "Image upload failed"}), 500
 
                     db.session.add(
                         ProductImage(
                             product_id=product.id,
-                            image_url=f"/static/uploads/products/{filename}",
-                            display_order=index + 1
+                            image_url=image_url,
+                            display_order=start_order + index + 1
                         )
                     )
+                    
+                    
 
             # ===============================
             # COMMIT
