@@ -2306,13 +2306,14 @@ def create_app():
         )
 
         result = []
-        # base_url = request.host_url.rstrip("/")
 
         for product in products:
 
             sizes = product.sizes or []
 
-            # Prepare images once per product
+            # ===============================
+            # ✅ FIXED IMAGE HANDLING
+            # ===============================
             images = []
 
             if product.images:
@@ -2322,12 +2323,11 @@ def create_app():
                 )
 
                 for img in sorted_images:
-                    if img.image_url:
+                    if img.image_url and img.image_url.startswith("http"):
                         images.append(img.image_url)
 
-            # fallback if no images
-            if not images:
-                images = []
+            # Optional: ensure no duplicates
+            images = list(dict.fromkeys(images))
 
             for size in sizes:
 
@@ -2348,7 +2348,6 @@ def create_app():
                     size.discounted_price if size.discounted_price else product.unit_price
                 )
 
-                # 🔥 Return each inventory row separately
                 for inv in inventories:
 
                     category_value = None
@@ -2373,6 +2372,7 @@ def create_app():
 
                         "quantity": inv.quantity or 0,
 
+                        # ✅ ONLY CLOUDINARY IMAGES
                         "images": images
                     })
 
@@ -5292,9 +5292,6 @@ def create_app():
                     data = request.get_json() or {}
                     files = []
 
-                # ✅ FIX: Always try to read files
-                files = request.files.getlist("product_images")
-
                 print("FILES RECEIVED:", files)
 
                 seller_ids = request.form.getlist("seller_ids[]") if request.form else data.get("seller_ids", [])
@@ -5693,25 +5690,50 @@ def create_app():
     def seller_add_product_stock():
 
         try:
+            # ===============================
+            # ✅ SUPPORT BOTH JSON + FORM DATA
+            # ===============================
+            data = request.get_json(silent=True)
 
-            data = request.get_json()
+            if not data:
+                data = request.form
+
             print("ADD STOCK REQUEST:", data)
 
+            # ===============================
+            # SAFE DATA EXTRACTION
+            # ===============================
             product_id = data.get("product_id")
             size_id = data.get("size_id")
-            quantity = int(data.get("quantity"))
+            quantity = data.get("quantity")
 
             if not product_id:
                 return jsonify({"error": "Product ID required"}), 400
+
+            try:
+                product_id = int(product_id)
+                quantity = int(quantity)
+            except (TypeError, ValueError):
+                return jsonify({"error": "Invalid numeric values"}), 400
+
+            # handle size_id safely
+            if size_id in [None, "", "null", 0, "0"]:
+                size_id = None
+            else:
+                try:
+                    size_id = int(size_id)
+                except:
+                    size_id = None
 
             if quantity <= 0:
                 return jsonify({"error": "Quantity must be positive"}), 400
 
             seller_id = get_current_user().seller_id
 
-            # ---------- HANDLE SIZE ----------
-
-            if size_id in [None, 0]:
+            # ===============================
+            # HANDLE SIZE
+            # ===============================
+            if size_id is None:
 
                 size = ProductSize.query.filter_by(
                     product_id=product_id
@@ -5720,20 +5742,19 @@ def create_app():
                 if size:
                     size_id = size.id
                 else:
-                    # create default size automatically
+                    # create default size
                     default_size = ProductSize(
                         product_id=product_id,
                         size="Standard",
                         quantity=0
                     )
-
                     db.session.add(default_size)
                     db.session.flush()
-
                     size_id = default_size.id
 
-            # ---------- FIND INVENTORY ----------
-
+            # ===============================
+            # FIND / CREATE INVENTORY
+            # ===============================
             inventory = SellerInventory.query.filter_by(
                 seller_id=seller_id,
                 product_id=product_id,
@@ -5741,7 +5762,6 @@ def create_app():
             ).first()
 
             if not inventory:
-
                 inventory = SellerInventory(
                     seller_id=seller_id,
                     product_id=product_id,
@@ -5750,11 +5770,11 @@ def create_app():
                     sent_stock=0,
                     remaining_stock=0
                 )
-
                 db.session.add(inventory)
 
-            # ---------- UPDATE STOCK ----------
-
+            # ===============================
+            # UPDATE STOCK
+            # ===============================
             inventory.total_allocated += quantity
             inventory.remaining_stock += quantity
 
@@ -5762,12 +5782,13 @@ def create_app():
 
             return jsonify({
                 "message": "Stock added successfully",
+                "product_id": product_id,
                 "size_id": size_id,
+                "added_quantity": quantity,
                 "remaining_stock": inventory.remaining_stock
             }), 200
 
         except Exception as e:
-
             db.session.rollback()
             print("ERROR ADDING STOCK:", str(e))
 
@@ -6432,11 +6453,6 @@ def create_app():
 
         seller_id = user.seller_id
 
-
-        # ===============================
-        # GET ALL SELLER PRODUCT MAPPINGS
-        # ===============================
-
         mappings = SellerSchoolProduct.query.filter_by(
             seller_id=seller_id
         ).all()
@@ -6450,30 +6466,24 @@ def create_app():
             if not product:
                 continue
 
-
-            # =========================================
-            # CREATE PRODUCT ENTRY ONCE
-            # =========================================
-
             if product.id not in products_map:
 
-                # ---------- LOAD IMAGES ----------
-
+                # ===============================
+                # ✅ FIXED IMAGE LOGIC (ONLY CHANGE)
+                # ===============================
                 image_records = ProductImage.query.filter_by(
                     product_id=product.id
                 ).order_by(ProductImage.display_order).all()
 
-                images = []
+                images = [
+                    img.image_url.strip()
+                    for img in image_records
+                    if img.image_url and img.image_url.strip().startswith("http")
+                ]
 
-                for img in image_records:
-                    if img.image_url:
-                        images.append(
-                            request.host_url.rstrip("/") + img.image_url
-                        )
-
-
-                # ---------- LOAD SCHOOLS ----------
-
+                # ===============================
+                # LOAD SCHOOLS
+                # ===============================
                 school_mappings = SellerSchoolProduct.query.filter_by(
                     seller_id=seller_id,
                     product_id=product.id
@@ -6482,13 +6492,11 @@ def create_app():
                 schools = []
 
                 for m in school_mappings:
-
                     if m.school:
                         schools.append({
                             "school_id": m.school.id,
                             "name": m.school.name
                         })
-
 
                 products_map[product.id] = {
                     "product_id": product.id,
@@ -6499,20 +6507,14 @@ def create_app():
                     "sizes": []
                 }
 
-
-                # =========================================
-                # LOAD PRODUCT SIZES
-                # =========================================
-
+                # ===============================
+                # LOAD SIZES
+                # ===============================
                 sizes = ProductSize.query.filter_by(
                     product_id=product.id
                 ).all()
 
-
-                # ---------- PRODUCT WITH SIZES ----------
-
                 if sizes:
-
                     for size in sizes:
 
                         inventory = SellerInventory.query.filter_by(
@@ -6528,12 +6530,7 @@ def create_app():
                             "size": size.size,
                             "quantity": quantity
                         })
-
-
-                # ---------- PRODUCT WITHOUT SIZES ----------
-
                 else:
-
                     inventory = SellerInventory.query.filter_by(
                         seller_id=seller_id,
                         product_id=product.id,
@@ -6547,7 +6544,6 @@ def create_app():
                         "size": "Standard",
                         "quantity": quantity
                     })
-
 
         return jsonify(list(products_map.values())), 200
     
@@ -6781,34 +6777,79 @@ def create_app():
     @role_required(UserRole.SCHOOL)
     def request_stock():
 
-        user = get_current_user()
-        data = request.get_json()
+        try:
+            user = get_current_user()
 
-        product_id = data.get("product_id")
-        seller_id = data.get("seller_id")
-        size_id = data.get("size_id")
-        quantity = int(data.get("quantity"))
+            # ===============================
+            # ✅ SUPPORT BOTH JSON + FORM DATA
+            # ===============================
+            data = request.get_json(silent=True)
+            if not data:
+                data = request.form
 
-        if quantity <= 0:
-            return jsonify({"error": "Invalid quantity"}), 400
+            print("REQUEST STOCK:", data)
 
-        req = SchoolStockRequest(
-            school_id=user.school_id,
-            seller_id=seller_id,
-            product_id=product_id,
-            size_id=size_id,
-            quantity=quantity,
-            request_type="SCHOOL_TO_SELLER",
-            status="PENDING"
-        )
+            # ===============================
+            # SAFE DATA EXTRACTION
+            # ===============================
+            product_id = data.get("product_id")
+            seller_id = data.get("seller_id")
+            size_id = data.get("size_id")
+            quantity = data.get("quantity")
 
-        db.session.add(req)
-        db.session.commit()
+            if not product_id or not seller_id:
+                return jsonify({"error": "Product ID and Seller ID required"}), 400
 
-        return jsonify({
-            "message": "Stock request sent to seller",
-            "request_id": req.id
-        }), 200
+            try:
+                product_id = int(product_id)
+                seller_id = int(seller_id)
+                quantity = int(quantity)
+            except (TypeError, ValueError):
+                return jsonify({"error": "Invalid numeric values"}), 400
+
+            # ===============================
+            # HANDLE SIZE SAFELY
+            # ===============================
+            if size_id in [None, "", "null", 0, "0"]:
+                size_id = None
+            else:
+                try:
+                    size_id = int(size_id)
+                except:
+                    size_id = None
+
+            if quantity <= 0:
+                return jsonify({"error": "Invalid quantity"}), 400
+
+            # ===============================
+            # CREATE REQUEST
+            # ===============================
+            req = SchoolStockRequest(
+                school_id=user.school_id,
+                seller_id=seller_id,
+                product_id=product_id,
+                size_id=size_id,
+                quantity=quantity,
+                request_type="SCHOOL_TO_SELLER",
+                status="PENDING"
+            )
+
+            db.session.add(req)
+            db.session.commit()
+
+            return jsonify({
+                "message": "Stock request sent to seller",
+                "request_id": req.id
+            }), 200
+
+        except Exception as e:
+            db.session.rollback()
+            print("REQUEST STOCK ERROR:", str(e))
+
+            return jsonify({
+                "error": "Failed to send request",
+                "details": str(e)
+            }), 500
         
     @app.route("/api/school/my-stock-requests", methods=["GET"])
     @jwt_required()
@@ -6888,7 +6929,9 @@ def create_app():
             if not product:
                 return jsonify({"error": "Product not found"}), 404
 
-            # Ensure seller is mapped to this product
+            # ===============================
+            # SECURITY CHECK
+            # ===============================
             mapping = SellerSchoolProduct.query.filter_by(
                 seller_id=user.seller_id,
                 product_id=product_id
@@ -6897,79 +6940,93 @@ def create_app():
             if not mapping:
                 return jsonify({"error": "Unauthorized product access"}), 403
 
-            # ===== READ DATA (JSON OR FORM) =====
-            data = request.get_json(silent=True) or request.form
-
-            # ===== UPDATE DESCRIPTION =====
-            description = data.get("description")
-
-            # allow empty description update
+            # ===============================
+            # UPDATE DESCRIPTION
+            # ===============================
+            description = request.form.get("description")
             if description is not None:
                 product.description = description
 
-            # ===== IMAGE UPDATE =====
-
-            # existing images from frontend
+            # ===============================
+            # EXISTING IMAGES FROM FRONTEND
+            # ===============================
             existing_images = request.form.getlist("existing_images")
 
-            # new uploaded images
-            images = request.files.getlist("images")
+            # 🔥 CRITICAL FIX: Handle React Native FormData issue
+            if len(existing_images) == 1 and "," in existing_images[0]:
+                existing_images = existing_images[0].split(",")
 
-            upload_folder = app.config["UPLOAD_FOLDER"]
+            # ===============================
+            # DELETE REMOVED IMAGES
+            # ===============================
+            old_images = ProductImage.query.filter_by(product_id=product_id).all()
 
-            if not os.path.exists(upload_folder):
-                os.makedirs(upload_folder)
+            # 🔥 Only delete if frontend actually sent data
+            if existing_images:
+                for img in old_images:
+                    if img.image_url not in existing_images:
+                        db.session.delete(img)
 
-            # delete removed images
-            if existing_images is not None:
+            # 🔥 IMPORTANT: flush deletions before counting
+            db.session.flush()
 
-                ProductImage.query.filter(
-                    ProductImage.product_id == product_id,
-                    ~ProductImage.image_url.in_(existing_images)
-                ).delete(synchronize_session=False)
+            # ===============================
+            # REORDER REMAINING IMAGES
+            # ===============================
+            remaining_images = ProductImage.query.filter_by(product_id=product_id).all()
 
-            # add new images
-            if images:
+            for idx, img in enumerate(remaining_images):
+                img.display_order = idx + 1
 
-                start_index = len(existing_images)
+            # ===============================
+            # UPLOAD NEW IMAGES (CLOUDINARY)
+            # ===============================
+            new_files = request.files.getlist("images")
 
-                for index, img in enumerate(images):
+            current_count = len(remaining_images)
 
-                    if img.filename == "":
-                        continue
+            for index, file in enumerate(new_files):
 
-                    ext = img.filename.split(".")[-1]
+                if file.filename == "":
+                    continue
 
-                    filename = f"{product_id}_{uuid.uuid4().hex}.{ext}"
+                upload_result = cloudinary.uploader.upload(
+                    file,
+                    folder="products",
+                    transformation=[
+                        {"width": 800, "height": 800, "crop": "limit"},
+                        {"quality": "auto"},
+                        {"fetch_format": "auto"}
+                    ]
+                )
 
-                    filepath = os.path.join(upload_folder, filename)
+                image_url = upload_result.get("secure_url")
 
-                    img.save(filepath)
+                if not image_url:
+                    continue
 
-                    db.session.add(
-                        ProductImage(
-                            product_id=product_id,
-                            image_url=f"/static/uploads/products/{filename}",
-                            display_order=start_index + index + 1
-                        )
+                db.session.add(
+                    ProductImage(
+                        product_id=product_id,
+                        image_url=image_url,
+                        display_order=current_count + index + 1
                     )
+                )
 
-            # ===== SAVE =====
-            db.session.add(product)
+            # ===============================
+            # SAVE CHANGES
+            # ===============================
             db.session.commit()
 
-            # 🔥 force refresh so other APIs see latest data
-            db.session.refresh(product)
-
             return jsonify({
-                "message": "Product updated successfully",
-                "product_id": product.id,
-                "description": product.description
+                "message": "Product updated successfully"
             }), 200
 
         except Exception as e:
 
             db.session.rollback()
+
+            print("UPDATE ERROR:", str(e))
 
             return jsonify({
                 "error": "Update failed",
