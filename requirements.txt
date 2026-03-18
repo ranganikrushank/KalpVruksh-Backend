@@ -5,3 +5,4 @@ flask_cors
 gunicorn
 razorpay
 psycopg2-binary
+cloudinary
