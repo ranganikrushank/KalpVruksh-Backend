@@ -153,12 +153,12 @@ def create_app():
                 admin = User(
                     full_name="Super Admin",
                     username="admin",
-                    email="admin@system.com",
-                    phone_number="7778888578",
+                    email="skpatel9270@gmail.com",
+                    phone_number="9099917109",
                     role=UserRole.SUPER_ADMIN
                 )
 
-                admin.set_password("ad123")
+                admin.set_password("Suresh@9270$")  # Change to a secure password in production
 
                 db.session.add(admin)
                 db.session.commit()
