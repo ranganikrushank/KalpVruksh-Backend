@@ -196,14 +196,102 @@ def create_app():
     # @app.route('/fix-db')
     # def fix_db():
     #     try:
-    #         db.session.execute(text(
-    #             "ALTER TABLE products ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE;"
-    #         ))
+    #         # 🔥 School Stock Requests
+    #         db.session.execute(text("""
+    #         ALTER TABLE school_stock_requests
+    #         DROP CONSTRAINT IF EXISTS school_stock_requests_school_id_fkey;
+    #         """))
+
+    #         db.session.execute(text("""
+    #         ALTER TABLE school_stock_requests
+    #         ADD CONSTRAINT school_stock_requests_school_id_fkey
+    #         FOREIGN KEY (school_id)
+    #         REFERENCES schools(id)
+    #         ON DELETE CASCADE;
+    #         """))
+
+    #         # 🔥 School Inventory
+    #         db.session.execute(text("""
+    #         ALTER TABLE school_inventory
+    #         DROP CONSTRAINT IF EXISTS school_inventory_school_id_fkey;
+    #         """))
+
+    #         db.session.execute(text("""
+    #         ALTER TABLE school_inventory
+    #         ADD CONSTRAINT school_inventory_school_id_fkey
+    #         FOREIGN KEY (school_id)
+    #         REFERENCES schools(id)
+    #         ON DELETE CASCADE;
+    #         """))
+
+    #         # 🔥 Seller School Product
+    #         db.session.execute(text("""
+    #         ALTER TABLE seller_school_product
+    #         DROP CONSTRAINT IF EXISTS seller_school_product_school_id_fkey;
+    #         """))
+
+    #         db.session.execute(text("""
+    #         ALTER TABLE seller_school_product
+    #         ADD CONSTRAINT seller_school_product_school_id_fkey
+    #         FOREIGN KEY (school_id)
+    #         REFERENCES schools(id)
+    #         ON DELETE CASCADE;
+    #         """))
+
+    #         # 🔥 Orders
+    #         db.session.execute(text("""
+    #         ALTER TABLE orders
+    #         DROP CONSTRAINT IF EXISTS orders_school_id_fkey;
+    #         """))
+
+    #         db.session.execute(text("""
+    #         ALTER TABLE orders
+    #         ADD CONSTRAINT orders_school_id_fkey
+    #         FOREIGN KEY (school_id)
+    #         REFERENCES schools(id)
+    #         ON DELETE CASCADE;
+    #         """))
+
+    #         # 🔥 Staff Orders
+    #         db.session.execute(text("""
+    #         ALTER TABLE staff_orders
+    #         DROP CONSTRAINT IF EXISTS staff_orders_school_id_fkey;
+    #         """))
+
+    #         db.session.execute(text("""
+    #         ALTER TABLE staff_orders
+    #         ADD CONSTRAINT staff_orders_school_id_fkey
+    #         FOREIGN KEY (school_id)
+    #         REFERENCES schools(id)
+    #         ON DELETE CASCADE;
+    #         """))
+
+    #         # 🔥 Users
+    #         db.session.execute(text("""
+    #         ALTER TABLE users
+    #         DROP CONSTRAINT IF EXISTS users_school_id_fkey;
+    #         """))
+
+    #         db.session.execute(text("""
+    #         ALTER TABLE users
+    #         ADD CONSTRAINT users_school_id_fkey
+    #         FOREIGN KEY (school_id)
+    #         REFERENCES schools(id)
+    #         ON DELETE CASCADE;
+    #         """))
+
     #         db.session.commit()
-    #         return {"message": "Column added successfully"}
+
+    #         return {
+    #             "success": True,
+    #             "message": "Cascade delete enabled successfully"
+    #         }
+
     #     except Exception as e:
     #         db.session.rollback()
-    #         return {"error": str(e)}
+    #         return {
+    #             "error": str(e)
+    #         }
     
     @app.route("/check-db")
     def check_db():
@@ -5118,19 +5206,59 @@ def create_app():
     @role_required(UserRole.SUPER_ADMIN)
     def delete_school(school_id):
         try:
-            school = School.query.get(school_id)
+            # 🔥 NEW (SQLAlchemy 2.0 safe)
+            school = db.session.get(School, school_id)
 
             if not school:
                 return jsonify({"error": "School not found"}), 404
 
-            # Delete related data FIRST
-            SchoolInventory.query.filter_by(school_id=school_id).delete()
-            SellerSchoolProduct.query.filter_by(school_id=school_id).delete()
-            Order.query.filter_by(school_id=school_id).delete()
-            StaffOrder.query.filter_by(school_id=school_id).delete()
-            User.query.filter_by(school_id=school_id).delete()
+            # ====================================================
+            # 🔥 LEVEL 3 (GRANDCHILD DEPENDENCIES)
+            # ====================================================
 
-            # Then delete school
+            # ORDER ITEMS (depends on orders)
+            db.session.query(OrderItem).filter(
+                OrderItem.order_id.in_(
+                    db.session.query(Order.id).filter_by(school_id=school_id)
+                )
+            ).delete(synchronize_session=False)
+
+            # STAFF ORDER ITEMS (depends on staff_orders)
+            db.session.query(StaffOrderItem).filter(
+                StaffOrderItem.staff_order_id.in_(
+                    db.session.query(StaffOrder.id).filter_by(school_id=school_id)
+                )
+            ).delete(synchronize_session=False)
+
+            # ====================================================
+            # 🔥 LEVEL 2 (CHILD DEPENDENCIES)
+            # ====================================================
+
+            db.session.query(SchoolStockRequest).filter_by(school_id=school_id).delete()
+
+            db.session.query(SellerSchoolProduct).filter_by(school_id=school_id).delete()
+
+            db.session.query(SchoolInventory).filter_by(school_id=school_id).delete()
+
+            db.session.query(Order).filter_by(school_id=school_id).delete()
+
+            db.session.query(StaffOrder).filter_by(school_id=school_id).delete()
+
+            db.session.query(User).filter_by(school_id=school_id).delete()
+
+            db.session.query(InventoryLedger).filter_by(school_id=school_id).delete()
+
+            db.session.query(AdminDispatchInstruction).filter_by(school_id=school_id).delete()
+
+            db.session.query(ProductImage).filter_by(school_id=school_id).delete()
+
+            # 🔥 SHIPMENTS (different column name)
+            db.session.query(Shipment).filter_by(to_school_id=school_id).delete()
+
+            # ====================================================
+            # 🔥 LEVEL 1 (PARENT)
+            # ====================================================
+
             db.session.delete(school)
 
             db.session.commit()
@@ -5142,7 +5270,12 @@ def create_app():
 
         except Exception as e:
             db.session.rollback()
-            print("DELETE ERROR:", str(e))  # 🔥 log this
+
+            print("========== DELETE SCHOOL ERROR ==========")
+            print("School ID:", school_id)
+            print("Error:", str(e))
+            print("=========================================")
+
             return jsonify({
                 "error": "Failed to delete school",
                 "details": str(e)
@@ -5333,22 +5466,42 @@ def create_app():
     def delete_seller(seller_id):
 
         try:
-
-            seller = Seller.query.get(seller_id)
+            # ✅ SQLAlchemy 2.0 safe
+            seller = db.session.get(Seller, seller_id)
 
             if not seller:
                 return jsonify({"error": "Seller not found"}), 404
 
-            # delete linked user
+            # ====================================================
+            # 🔥 LEVEL 2 (GRANDCHILD DEPENDENCIES)
+            # ====================================================
+
+            # OrderItems (direct FK to seller)
+            db.session.query(OrderItem).filter_by(seller_id=seller_id).delete()
+
+            # ====================================================
+            # 🔥 LEVEL 1 (CHILD DEPENDENCIES)
+            # ====================================================
+
             db.session.query(User).filter_by(seller_id=seller_id).delete()
 
-            # delete inventory
             db.session.query(SellerInventory).filter_by(seller_id=seller_id).delete()
 
-            # delete school-product mapping
             db.session.query(SellerSchoolProduct).filter_by(seller_id=seller_id).delete()
 
-            # delete seller
+            db.session.query(SchoolStockRequest).filter_by(seller_id=seller_id).delete()
+
+            db.session.query(AdminDispatchInstruction).filter_by(seller_id=seller_id).delete()
+
+            db.session.query(InventoryLedger).filter_by(seller_id=seller_id).delete()
+
+            # 🔥 Shipments (different column)
+            db.session.query(Shipment).filter_by(from_seller_id=seller_id).delete()
+
+            # ====================================================
+            # 🔥 DELETE SELLER
+            # ====================================================
+
             db.session.delete(seller)
 
             db.session.commit()
@@ -5359,8 +5512,12 @@ def create_app():
             }), 200
 
         except Exception as e:
-
             db.session.rollback()
+
+            print("========== DELETE SELLER ERROR ==========")
+            print("Seller ID:", seller_id)
+            print("Error:", str(e))
+            print("=========================================")
 
             return jsonify({
                 "error": "Failed to delete seller",
