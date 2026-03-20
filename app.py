@@ -5318,7 +5318,7 @@ def create_app():
                 # ================= PRICE =================
 
                 real_price = float(data.get("real_price") or 0)
-                discounted_price = float(data.get("discounted_price") or 0)
+                discounted_price = float(data.get("unit_price") or 0)
 
                 # ================= PROCESS IDS =================
 
