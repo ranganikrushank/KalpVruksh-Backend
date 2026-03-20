@@ -140,16 +140,23 @@ class Product(db.Model):
 
     __tablename__ = "products"
 
+    # ===============================
+    # CORE FIELDS
+    # ===============================
+
     id = db.Column(db.Integer, primary_key=True)
 
     name = db.Column(db.String(200), nullable=False)
     description = db.Column(db.Text)
-    sku = db.Column(db.String(100), unique=True, nullable=False)
 
+    sku = db.Column(db.String(100), unique=True, nullable=False)
     category = db.Column(db.String(50))
 
     real_price = db.Column(db.Float, default=0.0)
     unit_price = db.Column(db.Float, default=0.0)
+
+    # 🔥 IMPORTANT: SOFT DELETE FLAG
+    is_deleted = db.Column(db.Boolean, default=False)
 
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -167,28 +174,28 @@ class Product(db.Model):
     seller_inventory = db.relationship(
         "SellerInventory",
         backref="product",
-        cascade="all, delete-orphan",   # ✅ ADD THIS
+        cascade="all, delete-orphan",
         lazy=True
     )
 
     school_inventory = db.relationship(
         "SchoolInventory",
         backref="product",
-        cascade="all, delete-orphan",   # ✅ ADD THIS
+        cascade="all, delete-orphan",
         lazy=True
     )
 
     shipment_items = db.relationship(
         "ShipmentItem",
         backref="product",
-        cascade="all, delete-orphan",   # ✅ ADD THIS
+        cascade="all, delete-orphan",
         lazy=True
     )
 
+    # ⚠️ KEEP HISTORY → DO NOT CASCADE DELETE
     order_items = db.relationship(
         "OrderItem",
         backref="product",
-        cascade="all, delete-orphan",   # ✅ ADD THIS
         lazy=True
     )
 
@@ -198,6 +205,13 @@ class Product(db.Model):
         cascade="all, delete-orphan",
         lazy=True
     )
+
+    # ===============================
+    # OPTIONAL (DEBUG FRIENDLY)
+    # ===============================
+
+    def __repr__(self):
+        return f"<Product {self.id} - {self.name} - Deleted: {self.is_deleted}>"
 
 # ================= INVENTORY =================
 

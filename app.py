@@ -13,7 +13,7 @@ import razorpay
 from flask import (Flask, jsonify, redirect, render_template, request, session,
                    url_for)
 from flask_cors import CORS  # Add if needed for frontend
-from flask_jwt_extended import (JWTManager, create_access_token,
+from flask_jwt_extended import (JWTManager, create_access_token, get_current_user,
                                 get_jwt_identity, jwt_required,
                                 unset_jwt_cookies)
 from dotenv import load_dotenv
@@ -190,6 +190,20 @@ def create_app():
             timestamp=datetime.now(timezone.utc)
         )
         db.session.add(audit)
+        
+    from sqlalchemy import text
+
+    # @app.route('/fix-db')
+    # def fix_db():
+    #     try:
+    #         db.session.execute(text(
+    #             "ALTER TABLE products ADD COLUMN is_deleted BOOLEAN DEFAULT FALSE;"
+    #         ))
+    #         db.session.commit()
+    #         return {"message": "Column added successfully"}
+    #     except Exception as e:
+    #         db.session.rollback()
+    #         return {"error": str(e)}
     
     @app.route("/check-db")
     def check_db():
@@ -201,6 +215,7 @@ def create_app():
         
         tables = [row[0] for row in result]
         return {"tables": tables}
+    
     @app.route("/api/whoami", methods=["GET"])
     @jwt_required()
     def whoami():
@@ -2388,10 +2403,18 @@ def create_app():
         try:
 
             user = get_current_user()
-            data = request.get_json()
+            data = request.get_json(force=True)
 
             items = data.get("items")
-            payment_method = data.get("payment_method")
+            raw_payment = data.get("payment_method", "")
+
+            if isinstance(raw_payment, dict):
+                payment_method = str(raw_payment.get("type", "")).strip().lower()
+            else:
+                payment_method = str(raw_payment).strip().lower()
+
+            if payment_method not in ["coins", "razorpay", "cod"]:
+                return jsonify({"error": "Invalid payment method"}), 400
 
             if not items or not isinstance(items, list):
                 return jsonify({"error": "No items selected"}), 400
@@ -2478,7 +2501,7 @@ def create_app():
                     student_id=None,
                     school_id=school.id,
                     status="PENDING",
-                    payment_status="PENDING",
+                    payment_status=None,   # ✅ no status for COD
                     payment_mode=payment_method
                 )
 
@@ -2608,7 +2631,66 @@ def create_app():
                     "amount": total_amount
                 }), 200
 
+            # ===============================
+            # COD PAYMENT (🔥 MISSING PART)
+            # ===============================
+            elif payment_method == "cod":
 
+                for entry in order_items_buffer:
+
+                    item = entry["item"]
+                    inventory = entry["inventory"]
+                    quantity = entry["quantity"]
+                    total_price = entry["total_price"]
+
+                    inventory.sell_stock(quantity)
+
+                    if category_enum == CategoryType.STUDENT:
+
+                        mapping = SellerSchoolProduct.query.filter_by(
+                            product_id=item["product_id"],
+                            school_id=school.id
+                        ).first()
+
+                        if not mapping:
+                            return jsonify({
+                                "error": f"Seller mapping not found for product {item['product_id']}"
+                            }), 400
+
+                        order_item = OrderItem(
+                            order_id=order.id,
+                            product_id=item["product_id"],
+                            size_id=item["size_id"],
+                            seller_id=mapping.seller_id,
+                            quantity=quantity,
+                            unit_price=item["unit_price"],
+                            total_price=total_price
+                        )
+
+                    else:
+
+                        order_item = StaffOrderItem(
+                            staff_order_id=order.id,
+                            product_id=item["product_id"],
+                            size_id=item["size_id"],
+                            quantity=quantity,
+                            unit_price=item["unit_price"],
+                            total_price=total_price
+                        )
+
+                    db.session.add(order_item)
+
+                order.total_amount = total_amount
+                order.status = "PENDING"   # COD = not paid yet
+
+                db.session.commit()
+
+                return jsonify({
+                    "message": "Order placed successfully (COD)",
+                    "total_amount": total_amount
+                }), 200
+            
+            
             return jsonify({"error": "Invalid payment method"}), 400
 
 
@@ -4952,30 +5034,6 @@ def create_app():
             return success_response(message="School updated successfully")
 
         # ============================================================
-        # DELETE SCHOOL (DELETE)
-        # ============================================================
-        if request.method == 'DELETE':
-
-            school_id = request.args.get("id")
-
-            if not school_id:
-                return error_response("School ID required")
-
-            school = School.query.get(school_id)
-            if not school:
-                return error_response("School not found", 404)
-
-            User.query.filter_by(
-                school_id=school.id,
-                role=UserRole.SCHOOL
-            ).delete()
-
-            db.session.delete(school)
-            db.session.commit()
-
-            return success_response(message="School deleted successfully")
-
-        # ============================================================
         # GET SCHOOLS
         # ============================================================
 
@@ -5059,23 +5117,20 @@ def create_app():
     @jwt_required()
     @role_required(UserRole.SUPER_ADMIN)
     def delete_school(school_id):
-
         try:
-
             school = School.query.get(school_id)
 
             if not school:
                 return jsonify({"error": "School not found"}), 404
 
-            # delete user account
+            # Delete related data FIRST
+            SchoolInventory.query.filter_by(school_id=school_id).delete()
+            SellerSchoolProduct.query.filter_by(school_id=school_id).delete()
+            Order.query.filter_by(school_id=school_id).delete()
+            StaffOrder.query.filter_by(school_id=school_id).delete()
             User.query.filter_by(school_id=school_id).delete()
 
-            # delete school inventory
-            SchoolInventory.query.filter_by(school_id=school_id).delete()
-
-            # delete school product mappings
-            SellerSchoolProduct.query.filter_by(school_id=school_id).delete()
-
+            # Then delete school
             db.session.delete(school)
 
             db.session.commit()
@@ -5086,14 +5141,59 @@ def create_app():
             }), 200
 
         except Exception as e:
-
             db.session.rollback()
-
+            print("DELETE ERROR:", str(e))  # 🔥 log this
             return jsonify({
                 "error": "Failed to delete school",
                 "details": str(e)
             }), 500
-        
+    
+    @app.route('/api/seller/statement', methods=['GET'])
+    @jwt_required()
+    @role_required(UserRole.SELLER)
+    def seller_statement():
+
+        user = get_current_user()
+
+        product_id = request.args.get("product_id")
+        start_date = request.args.get("start_date")
+        end_date = request.args.get("end_date")
+
+        query = InventoryLedger.query.filter_by(
+            seller_id=user.seller_id
+        )
+
+        if product_id:
+            query = query.filter_by(product_id=product_id)
+
+        if start_date:
+            query = query.filter(InventoryLedger.created_at >= start_date)
+
+        if end_date:
+            query = query.filter(InventoryLedger.created_at <= end_date)
+
+        transactions = query.order_by(InventoryLedger.id.desc()).all()
+
+        result = []
+
+        for tx in transactions:
+
+            product = Product.query.get(tx.product_id)
+            size = ProductSize.query.get(tx.size_id) if tx.size_id else None
+
+            result.append({
+                "date": tx.created_at.strftime("%Y-%m-%d %H:%M"),
+                "product": product.name if product else "Unknown",
+                "size": size.size if size else "-",
+                "action": tx.action,
+                "quantity": tx.quantity,
+                "balance": tx.balance_after,
+                "reference": f"{tx.reference_type} #{tx.reference_id}"
+            })
+
+        return jsonify(result), 200
+
+
     @app.route('/api/admin/schools/<int:school_id>', methods=['PUT'])
     @jwt_required()
     @role_required(UserRole.SUPER_ADMIN)
@@ -5515,10 +5615,12 @@ def create_app():
         # GET PRODUCTS
         # =========================================================
 
-        products = Product.query.all()
+        products = Product.query.filter_by(is_deleted=False).all()
         response = []
 
         for p in products:
+            if getattr(p, "is_deleted", False):
+                continue
 
             images = ProductImage.query.filter_by(product_id=p.id).all()
             sizes = ProductSize.query.filter_by(product_id=p.id).all()
@@ -5562,6 +5664,7 @@ def create_app():
 
         return jsonify(response), 200
 
+    
     
     @app.route("/api/seller/dashboard-stats", methods=["GET"])
     @jwt_required()
@@ -5777,6 +5880,18 @@ def create_app():
             # ===============================
             inventory.total_allocated += quantity
             inventory.remaining_stock += quantity
+
+            # 🔥 RECORD IN LEDGER (THIS WAS MISSING)
+            record_inventory(
+                product_id=product_id,
+                size_id=size_id,
+                seller_id=seller_id,
+                action="ALLOCATED",
+                quantity=quantity,
+                balance=inventory.remaining_stock,
+                reference_type="seller_add_stock",
+                reference_id=None
+            )
 
             db.session.commit()
 
@@ -6101,77 +6216,77 @@ def create_app():
     # ADMIN RESTOCK PRODUCT
     # ===============================
 
-    @app.route('/api/admin/restock-product', methods=['POST'])
-    @jwt_required()
-    @role_required(UserRole.SUPER_ADMIN)
-    def admin_restock_product():
+    # @app.route('/api/admin/restock-product', methods=['POST'])
+    # @jwt_required()
+    # @role_required(UserRole.SUPER_ADMIN)
+    # def admin_restock_product():
 
-        try:
+    #     try:
 
-            data = request.get_json()
+    #         data = request.get_json()
 
-            product_id = int(data.get("product_id"))
-            seller_id = int(data.get("seller_id"))
-            quantity = int(data.get("quantity"))
+    #         product_id = int(data.get("product_id"))
+    #         seller_id = int(data.get("seller_id"))
+    #         quantity = int(data.get("quantity"))
 
-            if quantity <= 0:
-                return jsonify({"error": "Quantity must be greater than 0"}), 400
+    #         if quantity <= 0:
+    #             return jsonify({"error": "Quantity must be greater than 0"}), 400
 
-            product = Product.query.get(product_id)
-            seller = Seller.query.get(seller_id)
+    #         product = Product.query.get(product_id)
+    #         seller = Seller.query.get(seller_id)
 
-            if not product or not seller:
-                return jsonify({"error": "Invalid product or seller"}), 404
+    #         if not product or not seller:
+    #             return jsonify({"error": "Invalid product or seller"}), 404
 
-            inventory = SellerInventory.query.filter_by(
-                seller_id=seller_id,
-                product_id=product_id
-            ).first()
+    #         inventory = SellerInventory.query.filter_by(
+    #             seller_id=seller_id,
+    #             product_id=product_id
+    #         ).first()
 
-            if inventory:
+    #         if inventory:
 
-                inventory.total_allocated += quantity
-                inventory.remaining_stock += quantity
+    #             inventory.total_allocated += quantity
+    #             inventory.remaining_stock += quantity
 
-            else:
+    #         else:
 
-                inventory = SellerInventory(
-                    seller_id=seller_id,
-                    product_id=product_id,
-                    total_allocated=quantity,
-                    sent_stock=0,
-                    remaining_stock=quantity
-                )
+    #             inventory = SellerInventory(
+    #                 seller_id=seller_id,
+    #                 product_id=product_id,
+    #                 total_allocated=quantity,
+    #                 sent_stock=0,
+    #                 remaining_stock=quantity
+    #             )
 
-                db.session.add(inventory)
+    #             db.session.add(inventory)
 
-            ledger = InventoryLedger(
-                product_id=product_id,
-                seller_id=seller_id,
-                action="ADMIN_RESTOCK",
-                quantity=quantity,
-                balance_after=inventory.remaining_stock,
-                reference_type="RESTOCK",
-                created_at=datetime.now(timezone.utc)
-            )
+    #         ledger = InventoryLedger(
+    #             product_id=product_id,
+    #             seller_id=seller_id,
+    #             action="ADMIN_RESTOCK",
+    #             quantity=quantity,
+    #             balance_after=inventory.remaining_stock,
+    #             reference_type="RESTOCK",
+    #             created_at=datetime.now(timezone.utc)
+    #         )
 
-            db.session.add(ledger)
+    #         db.session.add(ledger)
 
-            db.session.commit()
+    #         db.session.commit()
 
-            return jsonify({
-                "message": "Stock added successfully",
-                "remaining_stock": inventory.remaining_stock
-            }), 200
+    #         return jsonify({
+    #             "message": "Stock added successfully",
+    #             "remaining_stock": inventory.remaining_stock
+    #         }), 200
 
-        except Exception as e:
+    #     except Exception as e:
 
-            db.session.rollback()
+    #         db.session.rollback()
 
-            return jsonify({
-                "error": "Restock failed",
-                "details": str(e)
-            }), 500
+    #         return jsonify({
+    #             "error": "Restock failed",
+    #             "details": str(e)
+    #         }), 500
         
     # ===============================
     # ADMIN ADD PRODUCT SIZE
@@ -6299,22 +6414,52 @@ def create_app():
                     "message": "Product not found"
                 }), 404
 
-            # DELETE DEPENDENT DATA FIRST
-            SellerInventory.query.filter_by(product_id=product_id).delete()
-            SchoolInventory.query.filter_by(product_id=product_id).delete()
-            SellerSchoolProduct.query.filter_by(product_id=product_id).delete()
-            ShipmentItem.query.filter_by(product_id=product_id).delete()
-            OrderItem.query.filter_by(product_id=product_id).delete()
+            # 🔴 CHECK IF LEDGER EXISTS
+            ledger_exists = InventoryLedger.query.filter_by(product_id=product_id).first()
 
-            # delete product
-            db.session.delete(product)
+            # ===============================
+            # CASE 1: NO LEDGER → FULL DELETE
+            # ===============================
+            if not ledger_exists:
 
-            db.session.commit()
+                SellerInventory.query.filter_by(product_id=product_id).delete()
+                SchoolInventory.query.filter_by(product_id=product_id).delete()
+                SellerSchoolProduct.query.filter_by(product_id=product_id).delete()
+                ShipmentItem.query.filter_by(product_id=product_id).delete()
+                OrderItem.query.filter_by(product_id=product_id).delete()
 
-            return jsonify({
-                "success": True,
-                "message": "Product deleted successfully"
-            }), 200
+                db.session.delete(product)
+
+                db.session.commit()
+
+                return jsonify({
+                    "success": True,
+                    "message": "Product deleted permanently"
+                }), 200
+
+            # ===============================
+            # CASE 2: LEDGER EXISTS → SAFE DELETE
+            # ===============================
+            else:
+
+                # 🔥 REMOVE FROM ACTIVE SYSTEM
+                SellerInventory.query.filter_by(product_id=product_id).delete()
+                SchoolInventory.query.filter_by(product_id=product_id).delete()
+                SellerSchoolProduct.query.filter_by(product_id=product_id).delete()
+                ShipmentItem.query.filter_by(product_id=product_id).delete()
+
+                # ❗ DO NOT DELETE OrderItem (history)
+                # ❗ DO NOT DELETE ProductSize (FK dependency)
+
+                # ✅ MARK PRODUCT AS DELETED
+                product.is_deleted = True
+
+                db.session.commit()
+
+                return jsonify({
+                    "success": True,
+                    "message": "Product removed from system (history preserved)"
+                }), 200
 
         except Exception as e:
 
@@ -8615,64 +8760,108 @@ def create_app():
     def student_products():
 
         try:
-
             user = get_current_user()
 
+            # ===============================
+            # FETCH INVENTORY (UPDATED)
+            # ===============================
             inventory_items = SchoolInventory.query.filter(
                 SchoolInventory.school_id == user.school_id,
-                SchoolInventory.category == CategoryType.STUDENT
+                SchoolInventory.category == CategoryType.STUDENT,
+                SchoolInventory.quantity >= 0   # ✅ FIX: allow out-of-stock products
             ).all()
 
             products = []
 
             for item in inventory_items:
 
-                product = item.product
-                size = item.size
+                # ===============================
+                # HARD SAFETY CHECKS
+                # ===============================
 
-                if not product:
+                # Ensure inventory is student
+                if item.category != CategoryType.STUDENT:
                     continue
 
-                # Collect product images
-                images = [
-                    img.image_url
-                    for img in product.images
-                ]
+                # Ensure product exists
+                if not item.product:
+                    continue
 
-                real_price = product.real_price or 0
-                discounted_price = product.unit_price or real_price
+                product = item.product
 
+                # 🔥 BLOCK STAFF PRODUCTS
+                if product.category:
+                    if product.category.strip().lower() == "staff":
+                        continue
+
+                size = item.size
+
+                # ===============================
+                # IMAGE HANDLING
+                # ===============================
+                images = []
+                if product.images:
+                    for img in product.images:
+                        if img.image_url:
+                            images.append(img.image_url)
+
+                # ===============================
+                # PRICING
+                # ===============================
+                # 🔥 PRIORITY: SIZE PRICE > PRODUCT PRICE
+
+                if item.size:
+                    real_price = item.size.real_price or product.real_price or 0
+                    discounted_price = item.size.discounted_price or product.unit_price or real_price
+                else:
+                    real_price = product.real_price or 0
+                    discounted_price = product.unit_price or real_price
+
+                # ===============================
+                # FINAL RESPONSE OBJECT
+                # ===============================
                 products.append({
 
-                    # IMPORTANT: use real inventory id
+                    # Inventory reference
                     "inventory_id": item.id,
 
+                    # Product info
                     "product_id": product.id,
-                    "name": product.name,
-                    "description": product.description,
-                    "category": product.category,
+                    "name": product.name or "Unnamed Product",
+                    "description": product.description or "",
+
+                    # Always use inventory category
+                    "category": item.category.value.lower(),
 
                     # Pricing
-                    "real_price": real_price,
-                    "discounted_price": discounted_price,
-                    "price": discounted_price,
+                    "real_price": float(real_price),
+                    "discounted_price": float(discounted_price),
+                    "price": float(discounted_price),
 
-                    # Size info
+                    # Size
                     "size_id": size.id if size else None,
                     "size": size.size if size else "Standard",
 
-                    # Stock
-                    "available_quantity": item.quantity,
+                    # Stock (can be 0 now)
+                    "available_quantity": int(item.quantity or 0),
 
                     # Images
-                    "images": images
+                    "images": images if images else []
                 })
+
+            # ===============================
+            # DEBUG LOG
+            # ===============================
+            print("STUDENT PRODUCTS COUNT:", len(products))
 
             return jsonify(products), 200
 
         except Exception as e:
             print("Student products error:", str(e))
-            return jsonify({"error": "Failed to load products"}), 500
+            return jsonify({
+                "success": False,
+                "error": "Failed to load products"
+            }), 500
 
     @app.route('/api/student/order', methods=['POST'])
     @jwt_required()
