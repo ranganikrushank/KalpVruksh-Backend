@@ -2415,7 +2415,7 @@ def create_app():
             sizes = product.sizes or []
 
             # ===============================
-            # ✅ FIXED IMAGE HANDLING
+            # ✅ IMAGE HANDLING (UNCHANGED)
             # ===============================
             images = []
 
@@ -2429,8 +2429,7 @@ def create_app():
                     if img.image_url and img.image_url.startswith("http"):
                         images.append(img.image_url)
 
-            # Optional: ensure no duplicates
-            images = list(dict.fromkeys(images))
+            images = list(dict.fromkeys(images))  # remove duplicates
 
             for size in sizes:
 
@@ -2441,24 +2440,40 @@ def create_app():
                         SchoolInventory.product_id == product.id,
                         SchoolInventory.size_id == size.id
                     )
-                    .order_by(SchoolInventory.id)
                     .all()
                 )
 
-                # Price priority
+                # ===============================
+                # ✅ NEW: GROUP BY CATEGORY
+                # ===============================
+                category_map = {}
+
+                for inv in inventories:
+                    category_key = inv.category.value if inv.category else "unknown"
+
+                    if category_key not in category_map:
+                        category_map[category_key] = {
+                            "quantity": 0,
+                            "inventory_id": inv.id  # keep one reference
+                        }
+
+                    category_map[category_key]["quantity"] += (inv.quantity or 0)
+
+                # ===============================
+                # PRICE LOGIC (UNCHANGED)
+                # ===============================
                 real_price = size.real_price if size.real_price else product.real_price
                 discounted_price = (
                     size.discounted_price if size.discounted_price else product.unit_price
                 )
 
-                for inv in inventories:
-
-                    category_value = None
-                    if inv.category:
-                        category_value = inv.category.value
+                # ===============================
+                # ✅ BUILD RESPONSE (CLEAN)
+                # ===============================
+                for category_value, data in category_map.items():
 
                     result.append({
-                        "inventory_id": inv.id,
+                        "inventory_id": data["inventory_id"],
 
                         "product_id": product.id,
                         "size_id": size.id,
@@ -2473,9 +2488,9 @@ def create_app():
 
                         "size": size.size,
 
-                        "quantity": inv.quantity or 0,
+                        # ✅ FINAL FIX: CLEAN QUANTITY
+                        "quantity": data["quantity"],
 
-                        # ✅ ONLY CLOUDINARY IMAGES
                         "images": images
                     })
 
@@ -2487,9 +2502,7 @@ def create_app():
     @jwt_required()
     @role_required(UserRole.SCHOOL)
     def school_place_order():
-
         try:
-
             user = get_current_user()
             data = request.get_json(force=True)
 
@@ -2515,13 +2528,7 @@ def create_app():
             # ===============================
             # CATEGORY DETECTION
             # ===============================
-
             category_str = items[0].get("category", "").lower()
-
-            if not category_str:
-                return jsonify({"error": "Category missing"}), 400
-
-            category_str = category_str.lower()
 
             if category_str == "student":
                 category_enum = CategoryType.STUDENT
@@ -2530,20 +2537,41 @@ def create_app():
             else:
                 return jsonify({"error": "Invalid category"}), 400
 
+            # ===============================
+            # MERGE ITEMS
+            # ===============================
+            merged_items = {}
+
+            for item in items:
+                key = (item.get("product_id"), item.get("size_id"))
+
+                if key not in merged_items:
+                    merged_items[key] = {
+                        "product_id": item.get("product_id"),
+                        "size_id": item.get("size_id"),
+                        "quantity": 0,
+                        "unit_price": float(item.get("unit_price"))
+                    }
+
+                merged_items[key]["quantity"] += int(item.get("quantity"))
 
             # ===============================
-            # PREPARE ITEMS + VALIDATION
+            # VALIDATION
             # ===============================
-
             total_amount = 0
             order_items_buffer = []
 
-            for item in items:
+            for item in merged_items.values():
 
-                product_id = item.get("product_id")
-                size_id = item.get("size_id")
-                quantity = int(item.get("quantity"))
-                unit_price = float(item.get("unit_price"))
+                product_id = item["product_id"]
+                size_id = item["size_id"]
+                quantity = item["quantity"]
+                unit_price = item["unit_price"]
+
+                print("---- ORDER DEBUG ----")
+                print("Incoming Item:", item)
+                print("School ID:", school.id)
+                print("Category:", category_enum)
 
                 if not product_id:
                     return jsonify({"error": "product_id missing"}), 400
@@ -2551,19 +2579,42 @@ def create_app():
                 if quantity <= 0:
                     return jsonify({"error": "Invalid quantity"}), 400
 
-                inventory = SchoolInventory.query.filter_by(
+                # 🔥 FIXED INVENTORY FETCH (MULTI-SCHOOL SAFE)
+
+                inventories = SchoolInventory.query.filter_by(
                     school_id=school.id,
                     product_id=product_id,
-                    size_id=size_id,
-                    category=category_enum
-                ).first()
+                    size_id=size_id
+                ).all()
 
-                if not inventory:
+                if not inventories:
                     return jsonify({
                         "error": f"Inventory not found for product {product_id}"
                     }), 400
 
-                if inventory.quantity < quantity:
+                # ✅ Try exact category first
+                inventory = next(
+                    (inv for inv in inventories if inv.category == category_enum),
+                    None
+                )
+
+                # ✅ FALLBACK: use any stock if category empty/zero
+                if not inventory or inventory.quantity <= 0:
+                    inventory = next(
+                        (inv for inv in inventories if inv.quantity > 0),
+                        None
+                    )
+
+                available_qty = inventory.quantity if inventory else 0
+
+                print("DEBUG ALL INVENTORY:", [
+                    {"category": inv.category.value, "qty": inv.quantity}
+                    for inv in inventories
+                ])
+
+                print("FINAL STOCK USED:", available_qty, "Requested:", quantity)
+
+                if not inventory or available_qty < quantity:
                     return jsonify({
                         "error": f"Insufficient stock for product {product_id}"
                     }), 400
@@ -2578,23 +2629,18 @@ def create_app():
                     "total_price": total_price
                 })
 
-
             # ===============================
-            # CREATE ORDER OBJECT
+            # CREATE ORDER
             # ===============================
-
             if category_enum == CategoryType.STUDENT:
-
                 order = Order(
                     student_id=None,
                     school_id=school.id,
                     status="PENDING",
-                    payment_status=None,   # ✅ no status for COD
+                    payment_status="PENDING" if payment_method == "cod" else "PAID",
                     payment_mode=payment_method
                 )
-
             else:
-
                 order = StaffOrder(
                     school_id=school.id,
                     status="PENDING"
@@ -2603,19 +2649,15 @@ def create_app():
             db.session.add(order)
             db.session.flush()
 
-
             # ===============================
-            # COIN PAYMENT
+            # COINS PAYMENT
             # ===============================
-
             if payment_method == "coins":
 
                 if school.coin_balance < total_amount:
                     return jsonify({"error": "Insufficient coins"}), 400
 
-                # Deduct coins
                 school.coin_balance -= total_amount
-
 
                 for entry in order_items_buffer:
 
@@ -2633,11 +2675,12 @@ def create_app():
                             school_id=school.id
                         ).first()
 
+                        print("Mapping Found:", mapping)
+
                         if not mapping:
                             return jsonify({
                                 "error": f"Seller mapping not found for product {item['product_id']}"
                             }), 400
-
 
                         order_item = OrderItem(
                             order_id=order.id,
@@ -2652,7 +2695,6 @@ def create_app():
                         ledger_action = "STUDENT_PURCHASE"
 
                     else:
-
                         order_item = StaffOrderItem(
                             staff_order_id=order.id,
                             product_id=item["product_id"],
@@ -2666,7 +2708,6 @@ def create_app():
 
                     db.session.add(order_item)
 
-
                     ledger = InventoryLedger(
                         product_id=item["product_id"],
                         school_id=school.id,
@@ -2679,7 +2720,6 @@ def create_app():
                     )
 
                     db.session.add(ledger)
-
 
                 order.total_amount = total_amount
                 order.status = "PAID"
@@ -2695,32 +2735,8 @@ def create_app():
                     "remaining_coins": school.coin_balance
                 }), 200
 
-
             # ===============================
-            # RAZORPAY PAYMENT
-            # ===============================
-
-            elif payment_method == "razorpay":
-
-                razorpay_order = razorpay_client.order.create({
-                    "amount": int(total_amount * 100),
-                    "currency": "INR"
-                })
-
-                order.total_amount = total_amount
-
-                if category_enum == CategoryType.STUDENT:
-                    order.razorpay_order_id = razorpay_order["id"]
-
-                db.session.commit()
-
-                return jsonify({
-                    "razorpay_order_id": razorpay_order["id"],
-                    "amount": total_amount
-                }), 200
-
-            # ===============================
-            # COD PAYMENT (🔥 MISSING PART)
+            # COD PAYMENT
             # ===============================
             elif payment_method == "cod":
 
@@ -2740,9 +2756,11 @@ def create_app():
                             school_id=school.id
                         ).first()
 
+                        print("Mapping Found:", mapping)
+
                         if not mapping:
                             return jsonify({
-                                "error": f"Seller mapping not found for product {item['product_id']}"
+                                "error": "Seller mapping not found"
                             }), 400
 
                         order_item = OrderItem(
@@ -2756,7 +2774,6 @@ def create_app():
                         )
 
                     else:
-
                         order_item = StaffOrderItem(
                             staff_order_id=order.id,
                             product_id=item["product_id"],
@@ -2769,7 +2786,7 @@ def create_app():
                     db.session.add(order_item)
 
                 order.total_amount = total_amount
-                order.status = "PENDING"   # COD = not paid yet
+                order.status = "PENDING"
 
                 db.session.commit()
 
@@ -2777,17 +2794,34 @@ def create_app():
                     "message": "Order placed successfully (COD)",
                     "total_amount": total_amount
                 }), 200
-            
-            
+
+            # ===============================
+            # RAZORPAY
+            # ===============================
+            elif payment_method == "razorpay":
+
+                razorpay_order = razorpay_client.order.create({
+                    "amount": int(total_amount * 100),
+                    "currency": "INR"
+                })
+
+                order.total_amount = total_amount
+
+                if category_enum == CategoryType.STUDENT:
+                    order.razorpay_order_id = razorpay_order["id"]
+
+                db.session.commit()
+
+                return jsonify({
+                    "razorpay_order_id": razorpay_order["id"],
+                    "amount": total_amount
+                }), 200
+
             return jsonify({"error": "Invalid payment method"}), 400
 
-
         except Exception as e:
-
             db.session.rollback()
-
             print("Place order error:", str(e))
-
             return jsonify({
                 "error": "Failed to place order",
                 "details": str(e)
@@ -5676,7 +5710,7 @@ def create_app():
                     sizes.append(size)
 
                 # ===============================
-                # CREATE SCHOOL INVENTORY
+                # CREATE SCHOOL INVENTORY (FIXED)
                 # ===============================
 
                 category = data.get("category")
@@ -5712,6 +5746,11 @@ def create_app():
                                         low_stock_threshold=10
                                     )
                                 )
+
+                            else:
+                                # 🔥 FIX: Ensure inventory row is valid (prevents ghost zero issues)
+                                if existing.quantity is None:
+                                    existing.quantity = 0
 
                 # ===============================
                 # CREATE SELLER INVENTORY
@@ -8505,40 +8544,30 @@ def create_app():
             if not user or not user.school_id:
                 return jsonify({"error": "Invalid school user"}), 403
 
-            # Fetch ALL orders for this school (no status filter)
-            orders = (
+            result = []
+
+            # ===============================
+            # ✅ STUDENT ORDERS
+            # ===============================
+            student_orders = (
                 db.session.query(Order)
                 .filter(Order.school_id == user.school_id)
                 .order_by(Order.created_at.desc())
                 .all()
             )
 
-            print("TOTAL ORDERS FOUND:", len(orders))
+            for order in student_orders:
 
-            result = []
-
-            for order in orders:
-
-                print("ORDER:", order.id, "STATUS:", order.status)
-
-                items = (
-                    db.session.query(OrderItem)
-                    .filter(OrderItem.order_id == order.id)
-                    .all()
-                )
+                items = OrderItem.query.filter_by(order_id=order.id).all()
 
                 items_data = []
                 calculated_total = 0
 
                 for item in items:
-
                     product = db.session.get(Product, item.product_id)
                     size = db.session.get(ProductSize, item.size_id) if item.size_id else None
 
-                    item_total = item.total_price if item.total_price else (
-                        item.quantity * item.unit_price
-                    )
-
+                    item_total = item.total_price or (item.quantity * item.unit_price)
                     calculated_total += item_total
 
                     items_data.append({
@@ -8552,7 +8581,7 @@ def create_app():
 
                 result.append({
                     "order_id": order.id,
-                    "status": order.status,   # Always return real DB status
+                    "status": order.status,
                     "payment_status": order.payment_status,
                     "payment_mode": getattr(order, "payment_mode", "online"),
                     "total_amount": calculated_total,
@@ -8560,13 +8589,61 @@ def create_app():
                     "items": items_data
                 })
 
-            return jsonify({
-                "orders": result
-            }), 200
+            # ===============================
+            # 🔥 ADD THIS BLOCK (STAFF ORDERS)
+            # ===============================
+            staff_orders = (
+                db.session.query(StaffOrder)
+                .filter(StaffOrder.school_id == user.school_id)
+                .order_by(StaffOrder.created_at.desc())
+                .all()
+            )
+
+            for order in staff_orders:
+
+                items = StaffOrderItem.query.filter_by(
+                    staff_order_id=order.id
+                ).all()
+
+                items_data = []
+                calculated_total = 0
+
+                for item in items:
+                    product = db.session.get(Product, item.product_id)
+                    size = db.session.get(ProductSize, item.size_id) if item.size_id else None
+
+                    item_total = item.total_price or (item.quantity * item.unit_price)
+                    calculated_total += item_total
+
+                    items_data.append({
+                        "product_name": product.name if product else "Unknown Product",
+                        "sku": product.sku if product else None,
+                        "size": size.size if size else "N/A",
+                        "quantity": item.quantity,
+                        "unit_price": item.unit_price,
+                        "total_price": item_total
+                    })
+
+                result.append({
+                    "order_id": order.id,
+                    "status": order.status,
+                    "payment_status": "PAID",  # or None if you prefer
+                    "payment_mode": "staff",   # 🔥 differentiate
+                    "total_amount": calculated_total,
+                    "created_at": order.created_at.isoformat(),
+                    "items": items_data
+                })
+
+            # ===============================
+            # 🔥 SORT BOTH TOGETHER
+            # ===============================
+            result.sort(key=lambda x: x["created_at"], reverse=True)
+
+            return jsonify({"orders": result}), 200
 
         except Exception as e:
-            print("School student orders error:", str(e))
-            return jsonify({"error": "Failed to fetch student orders"}), 500
+            print("School orders error:", str(e))
+            return jsonify({"error": "Failed to fetch orders"}), 500
     
     @app.route('/api/school/update-handover/<int:order_id>', methods=['PUT'])
     @jwt_required()
