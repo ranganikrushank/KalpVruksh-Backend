@@ -25,7 +25,7 @@ from models import (AdminDispatchInstruction, AuditLog, CategoryType,
                     InventoryLedger, Order, OrderItem, Product, ProductImage,
                     ProductSize, School, SchoolInventory, SchoolStockRequest,
                     Seller, SellerInventory, SellerSchoolProduct, Shipment,
-                    ShipmentItem, ShipmentStatus, StaffOrder, StaffOrderItem,
+                    ShipmentItem, ShipmentStatus, StaffOrder, StaffOrderItem,SellerPayment,
                     User, UserRole, db)
 
 
@@ -128,9 +128,15 @@ def create_app():
     CORS(
         app,
         resources={r"/api/*": {"origins": "*"}},
-        supports_credentials=True
+        supports_credentials=False,
+        allow_headers=["Content-Type", "Authorization"],
+        methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"]
     )
     
+    @app.before_request
+    def handle_preflight():
+        if request.method == "OPTIONS":
+            return jsonify({"status": "ok"}), 200
     app.secret_key = os.environ.get("SECRET_KEY", "super-secret-key")
     
     db.init_app(app)
@@ -144,7 +150,7 @@ def create_app():
     app.config['MAX_CONTENT_LENGTH'] = 30 * 1024 * 1024
 
     with app.app_context():
-        db.create_all()
+        # db.create_all()
         try:
             admin = User.query.filter_by(role=UserRole.SUPER_ADMIN).first()
 
@@ -191,105 +197,53 @@ def create_app():
         )
         db.session.add(audit)
         
-    from sqlalchemy import text
+    # from sqlalchemy import text
 
-    # @app.route('/fix-db')
+    # @app.route('/fix-db', methods=['GET'])
     # def fix_db():
     #     try:
-    #         # 🔥 School Stock Requests
-    #         db.session.execute(text("""
-    #         ALTER TABLE school_stock_requests
-    #         DROP CONSTRAINT IF EXISTS school_stock_requests_school_id_fkey;
-    #         """))
 
-    #         db.session.execute(text("""
-    #         ALTER TABLE school_stock_requests
-    #         ADD CONSTRAINT school_stock_requests_school_id_fkey
-    #         FOREIGN KEY (school_id)
-    #         REFERENCES schools(id)
-    #         ON DELETE CASCADE;
-    #         """))
+    #         queries = [
 
-    #         # 🔥 School Inventory
-    #         db.session.execute(text("""
-    #         ALTER TABLE school_inventory
-    #         DROP CONSTRAINT IF EXISTS school_inventory_school_id_fkey;
-    #         """))
+    #             # ====================================
+    #             # ✅ FIX seller_payments.product_id
+    #             # ====================================
 
-    #         db.session.execute(text("""
-    #         ALTER TABLE school_inventory
-    #         ADD CONSTRAINT school_inventory_school_id_fkey
-    #         FOREIGN KEY (school_id)
-    #         REFERENCES schools(id)
-    #         ON DELETE CASCADE;
-    #         """))
+    #             # Drop NOT NULL constraint
+    #             """
+    #             ALTER TABLE seller_payments
+    #             ALTER COLUMN product_id DROP NOT NULL;
+    #             """,
 
-    #         # 🔥 Seller School Product
-    #         db.session.execute(text("""
-    #         ALTER TABLE seller_school_product
-    #         DROP CONSTRAINT IF EXISTS seller_school_product_school_id_fkey;
-    #         """))
+    #             # Allow NULL safely (FK still valid)
+    #             """
+    #             ALTER TABLE seller_payments
+    #             DROP CONSTRAINT IF EXISTS seller_payments_product_id_fkey;
+    #             """,
 
-    #         db.session.execute(text("""
-    #         ALTER TABLE seller_school_product
-    #         ADD CONSTRAINT seller_school_product_school_id_fkey
-    #         FOREIGN KEY (school_id)
-    #         REFERENCES schools(id)
-    #         ON DELETE CASCADE;
-    #         """))
+    #             """
+    #             ALTER TABLE seller_payments
+    #             ADD CONSTRAINT seller_payments_product_id_fkey
+    #             FOREIGN KEY (product_id)
+    #             REFERENCES products(id)
+    #             ON DELETE SET NULL;
+    #             """
+    #         ]
 
-    #         # 🔥 Orders
-    #         db.session.execute(text("""
-    #         ALTER TABLE orders
-    #         DROP CONSTRAINT IF EXISTS orders_school_id_fkey;
-    #         """))
-
-    #         db.session.execute(text("""
-    #         ALTER TABLE orders
-    #         ADD CONSTRAINT orders_school_id_fkey
-    #         FOREIGN KEY (school_id)
-    #         REFERENCES schools(id)
-    #         ON DELETE CASCADE;
-    #         """))
-
-    #         # 🔥 Staff Orders
-    #         db.session.execute(text("""
-    #         ALTER TABLE staff_orders
-    #         DROP CONSTRAINT IF EXISTS staff_orders_school_id_fkey;
-    #         """))
-
-    #         db.session.execute(text("""
-    #         ALTER TABLE staff_orders
-    #         ADD CONSTRAINT staff_orders_school_id_fkey
-    #         FOREIGN KEY (school_id)
-    #         REFERENCES schools(id)
-    #         ON DELETE CASCADE;
-    #         """))
-
-    #         # 🔥 Users
-    #         db.session.execute(text("""
-    #         ALTER TABLE users
-    #         DROP CONSTRAINT IF EXISTS users_school_id_fkey;
-    #         """))
-
-    #         db.session.execute(text("""
-    #         ALTER TABLE users
-    #         ADD CONSTRAINT users_school_id_fkey
-    #         FOREIGN KEY (school_id)
-    #         REFERENCES schools(id)
-    #         ON DELETE CASCADE;
-    #         """))
+    #         for q in queries:
+    #             db.session.execute(text(q))
 
     #         db.session.commit()
 
     #         return {
     #             "success": True,
-    #             "message": "Cascade delete enabled successfully"
+    #             "message": "seller_payments table fixed successfully"
     #         }
 
     #     except Exception as e:
     #         db.session.rollback()
     #         return {
+    #             "success": False,
     #             "error": str(e)
     #         }
     
@@ -2826,7 +2780,263 @@ def create_app():
                 "error": "Failed to place order",
                 "details": str(e)
             }), 500
+
+    from datetime import datetime
+    from calendar import monthrange
+    from sqlalchemy import func
+
+    @app.route('/api/admin/revenue-dashboard', methods=['GET'])
+    @jwt_required()
+    def admin_revenue_dashboard():
+
+        try:
+            month = int(request.args.get("month"))
+            year = int(request.args.get("year"))
+
+            # ===== AUTH USER =====
+            current_user_id = get_jwt_identity()
+            claims = get_jwt()
+            user_role = claims.get("role")
+
+            user = User.query.get(current_user_id)
+
+            seller_id_filter = None
+            if user_role == "seller":
+                seller_id_filter = user.seller_id
+
+            # ===== DATE RANGE =====
+            start_date = datetime(year, month, 1)
+            last_day = monthrange(year, month)[1]
+            end_date = datetime(year, month, last_day, 23, 59, 59)
+
+            # ===== STUDENT QUERY =====
+            student_query = (
+                db.session.query(
+                    Seller.id.label("seller_id"),
+                    Seller.name.label("seller_name"),
+                    Product.name.label("product_name"),
+                    School.name.label("school_name"),
+                    ProductSize.size.label("size"),
+                    OrderItem.unit_price.label("price"),
+                    func.sum(OrderItem.quantity).label("total_qty"),
+                    func.sum(OrderItem.total_price).label("total_amount")
+                )
+                .join(Order, Order.id == OrderItem.order_id)
+                .join(Product, Product.id == OrderItem.product_id)
+                .join(ProductSize, ProductSize.id == OrderItem.size_id)
+                .join(Seller, Seller.id == OrderItem.seller_id)
+                .join(School, School.id == Order.school_id)
+                .filter(
+                    Order.created_at >= start_date,
+                    Order.created_at <= end_date
+                )
+            )
+
+            # 🔥 SELLER FILTER
+            if seller_id_filter:
+                student_query = student_query.filter(OrderItem.seller_id == seller_id_filter)
+
+            rows = (
+                student_query
+                .group_by(
+                    Seller.id,
+                    Seller.name,
+                    Product.name,
+                    School.name,
+                    ProductSize.size,
+                    OrderItem.unit_price
+                )
+                .order_by(Seller.name)
+                .all()
+            )
+
+            # ===== STAFF QUERY =====
+            staff_query = (
+                db.session.query(
+                    Seller.id.label("seller_id"),
+                    Seller.name.label("seller_name"),
+                    Product.name.label("product_name"),
+                    School.name.label("school_name"),
+                    ProductSize.size.label("size"),
+                    StaffOrderItem.unit_price.label("price"),
+                    func.sum(StaffOrderItem.quantity).label("total_qty"),
+                    func.sum(StaffOrderItem.total_price).label("total_amount")
+                )
+                .join(StaffOrder, StaffOrder.id == StaffOrderItem.staff_order_id)
+                .join(Product, Product.id == StaffOrderItem.product_id)
+                .join(ProductSize, ProductSize.id == StaffOrderItem.size_id)
+                .join(SellerInventory,
+                    (SellerInventory.product_id == StaffOrderItem.product_id) &
+                    (SellerInventory.size_id == StaffOrderItem.size_id))
+                .join(Seller, Seller.id == SellerInventory.seller_id)
+                .join(School, School.id == StaffOrder.school_id)
+                .filter(
+                    StaffOrder.created_at >= start_date,
+                    StaffOrder.created_at <= end_date
+                )
+            )
+
+            # 🔥 SELLER FILTER
+            if seller_id_filter:
+                staff_query = staff_query.filter(Seller.id == seller_id_filter)
+
+            staff_rows = (
+                staff_query
+                .group_by(
+                    Seller.id,
+                    Seller.name,
+                    Product.name,
+                    School.name,
+                    ProductSize.size,
+                    StaffOrderItem.unit_price
+                )
+                .all()
+            )
+
+            # ===== MERGE STUDENT + STAFF =====
+            all_rows = list(rows) + list(staff_rows)
+
+            seller_map = {}
+
+            for r in all_rows:
+
+                if r.seller_id not in seller_map:
+                    seller_map[r.seller_id] = {
+                        "seller_id": r.seller_id,
+                        "seller_name": r.seller_name,
+                        "products_map": {},
+                        "total_amount": 0
+                    }
+
+                key = f"{r.product_name}_{r.school_name}_{r.size}_{r.price}"
+
+                products_map = seller_map[r.seller_id]["products_map"]
+
+                if key not in products_map:
+                    products_map[key] = {
+                        "product": r.product_name,
+                        "school": r.school_name,
+                        "size": r.size,
+                        "quantity": 0,
+                        "price": float(r.price),
+                        "total": 0
+                    }
+
+                products_map[key]["quantity"] += int(r.total_qty)
+                products_map[key]["total"] += float(r.total_amount)
+
+                seller_map[r.seller_id]["total_amount"] += float(r.total_amount)
+
+            # ===== FINAL RESULT =====
+            result = []
+
+            for seller_id, data in seller_map.items():
+
+                data["products"] = list(data["products_map"].values())
+                del data["products_map"]
+
+                payment = SellerPayment.query.filter_by(
+                    seller_id=seller_id
+                ).filter(
+                    SellerPayment.from_date == start_date.date(),
+                    SellerPayment.to_date == end_date.date()
+                ).first()
+
+                data["payment_status"] = "PAID" if payment else "UNPAID"
+                data["paid_on"] = payment.created_at.isoformat() if payment else None
+
+                result.append(data)
+
+            return jsonify({
+                "month": month,
+                "year": year,
+                "data": result
+            }), 200
+
+        except Exception as e:
+            print("Revenue Dashboard Error:", str(e))
+            return jsonify({"error": "Failed to load revenue dashboard"}), 500
+        
+    @app.route('/api/admin/mark-seller-paid', methods=['POST'])
+    @jwt_required()
+    @role_required(UserRole.SUPER_ADMIN)
+    def mark_seller_paid():
+
+        try:
+            data = request.get_json()
+
+            seller_id = int(data.get("seller_id"))
+            month = int(data.get("month"))
+            year = int(data.get("year"))
+            total_amount = float(data.get("total_amount"))
+
+            # ===== DATE RANGE =====
+            start_date = datetime(year, month, 1).date()
+            last_day = monthrange(year, month)[1]
+            end_date = datetime(year, month, last_day).date()
+
+            # ===== CHECK DUPLICATE =====
+            existing = SellerPayment.query.filter_by(
+                seller_id=seller_id,
+                from_date=start_date,
+                to_date=end_date
+            ).first()
+
+            if existing:
+                return jsonify({"error": "Already marked as paid"}), 400
+
+            # ===== CREATE PAYMENT RECORD =====
+            payment = SellerPayment(
+                seller_id=seller_id,
+                product_id=None,  # Not needed (month-based payment)
+                from_date=start_date,
+                to_date=end_date,
+                paid_amount=total_amount
+            )
+
+            db.session.add(payment)
+            db.session.commit()
+
+            return jsonify({
+                "success": True,
+                "message": "Payment marked successfully"
+            }), 200
+
+        except Exception as e:
+            db.session.rollback()
+            print("Payment Error:", str(e))
+            return jsonify({"error": "Failed to mark payment"}), 500
     
+    @app.route('/api/admin/payments', methods=['GET'])
+    @jwt_required()
+    @role_required(UserRole.SUPER_ADMIN)
+    def get_payments():
+
+        try:
+            payments = SellerPayment.query.order_by(SellerPayment.created_at.desc()).all()
+
+            result = []
+
+            for p in payments:
+                result.append({
+                    "id": p.id,
+                    "seller": p.seller,
+                    "product": p.product,
+                    "from_date": p.from_date.strftime("%Y-%m-%d"),
+                    "to_date": p.to_date.strftime("%Y-%m-%d"),
+                    "total_amount": float(p.total_amount),
+                    "status": p.status,
+                    "created_at": p.created_at.strftime("%Y-%m-%d %H:%M:%S")
+                })
+
+            return jsonify(result), 200
+
+        except Exception as e:
+            return jsonify({
+                "success": False,
+                "error": str(e)
+            }), 500
+
     @app.route('/api/admin/all-staff-orders', methods=['GET'])
     @jwt_required()
     @role_required(UserRole.SUPER_ADMIN)

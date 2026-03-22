@@ -215,6 +215,34 @@ class Product(db.Model):
 
 # ================= INVENTORY =================
 
+class SellerPayment(db.Model):
+    __tablename__ = "seller_payments"
+
+    id = db.Column(db.Integer, primary_key=True)
+
+    seller_id = db.Column(
+        db.Integer,
+        db.ForeignKey("sellers.id"),
+        nullable=False
+    )
+
+    product_id = db.Column(
+        db.Integer,
+        db.ForeignKey("products.id"),
+        nullable=True
+    )
+
+    from_date = db.Column(db.Date, nullable=False)
+    to_date = db.Column(db.Date, nullable=False)
+
+    paid_amount = db.Column(db.Float, nullable=False)
+
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    # relationships
+    seller = db.relationship("Seller")
+    product = db.relationship("Product")
+    
 class SellerInventory(db.Model):
 
     __tablename__ = "seller_inventory"
