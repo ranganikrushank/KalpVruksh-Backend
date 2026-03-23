@@ -3764,116 +3764,94 @@ def create_app():
 
         try:
 
-            logs = (
-                InventoryLedger.query
-                .order_by(InventoryLedger.created_at.desc())
-                .all()
-            )
+            # ================= FILTER PARAMS =================
+            tx_type = request.args.get("type")  # in / out
+            seller_id = request.args.get("seller_id")
+            school_id = request.args.get("school_id")
+            search = request.args.get("search")
+
+            query = InventoryLedger.query
+
+            # ================= APPLY FILTERS =================
+
+            if seller_id:
+                query = query.filter(InventoryLedger.seller_id == seller_id)
+
+            if school_id:
+                query = query.filter(InventoryLedger.school_id == school_id)
+
+            logs = query.order_by(InventoryLedger.created_at.desc()).all()
 
             result = []
 
             for log in logs:
 
-                # ================= FETCH RELATED DATA =================
-
                 product = Product.query.get(log.product_id)
-
                 seller = Seller.query.get(log.seller_id) if log.seller_id else None
                 school = School.query.get(log.school_id) if log.school_id else None
+                size = ProductSize.query.get(log.size_id) if log.size_id else None
 
-                size = None
-                if hasattr(log, "size_id") and log.size_id:
-                    size = ProductSize.query.get(log.size_id)
+                product_name = product.name if product else "Product"
+                size_name = f" ({size.size})" if size else ""
 
-                # ================= DETERMINE FROM / TO =================
+                seller_name = seller.name if seller else "Seller"
+                school_name = school.name if school else "School"
 
-                from_entity = "-"
-                to_entity = "-"
+                qty = abs(log.quantity)
 
-                # ADMIN → SELLER
-                if log.action in ["ADMIN_STOCK_ADDED", "SELLER_STOCK_RECEIVED"]:
+                # ================= TYPE =================
+                tx_category = "IN" if log.quantity > 0 else "OUT"
 
-                    from_entity = "Admin"
-                    to_entity = seller.name if seller else "Seller"
+                # FILTER TYPE
+                if tx_type == "in" and log.quantity <= 0:
+                    continue
+                if tx_type == "out" and log.quantity > 0:
+                    continue
 
-                # SELLER → SCHOOL
-                elif log.action in ["SELLER_TO_SCHOOL_SHIPMENT", "SCHOOL_STOCK_RECEIVED"]:
+                # SEARCH FILTER
+                if search and search.lower() not in product_name.lower():
+                    continue
 
-                    from_entity = seller.name if seller else "Seller"
-                    to_entity = school.name if school else "School"
+                # ================= DESCRIPTION =================
+                if log.action == "ADMIN_STOCK_ADDED":
+                    desc = f"Admin added {qty} units of {product_name}{size_name} to {seller_name}"
 
-                # SCHOOL → SELLER  ✅ (THIS WAS MISSING)
-                elif log.action in ["SCHOOL_SENT_TO_SELLER", "SELLER_RECEIVED_FROM_SCHOOL"]:
+                elif log.action == "SELLER_TO_SCHOOL_SHIPMENT":
+                    desc = f"{seller_name} sent {qty} units of {product_name}{size_name} to {school_name}"
 
-                    from_entity = school.name if school else "School"
-                    to_entity = seller.name if seller else "Seller"
+                elif log.action == "SCHOOL_STOCK_RECEIVED":
+                    desc = f"{school_name} received {qty} units from {seller_name}"
 
-                # STUDENT PURCHASE
+                elif log.action == "SCHOOL_SENT_TO_SELLER":
+                    desc = f"{school_name} returned {qty} units to {seller_name}"
+
                 elif log.action == "STUDENT_PURCHASE":
+                    desc = f"Student purchased {qty} units of {product_name}{size_name}"
 
-                    from_entity = school.name if school else "School"
-                    to_entity = "Student"
-
-                # STAFF PURCHASE
                 elif log.action == "STAFF_PURCHASE":
+                    desc = f"Staff purchased {qty} units of {product_name}{size_name}"
 
-                    from_entity = school.name if school else "School"
-                    to_entity = "Staff"
-
-                # FALLBACK LOGIC
                 else:
+                    desc = f"{product_name} stock updated by {qty} units"
 
-                    if log.quantity > 0:
-                        from_entity = seller.name if seller else "System"
-                        to_entity = school.name if school else "Inventory"
-
-                    else:
-                        from_entity = school.name if school else "Inventory"
-                        to_entity = "Customer"
-
-                # ================= FORMAT DATE =================
-
-                created_at = None
-
-                if log.created_at:
-                    created_at = log.created_at.strftime("%Y-%m-%d %H:%M")
-
-                # ================= BUILD RESPONSE =================
+                created_at = log.created_at.strftime("%Y-%m-%d %H:%M") if log.created_at else None
 
                 result.append({
-
                     "id": log.id,
-
-                    "product_id": log.product_id,
-                    "product_name": product.name if product else "Unknown",
-
+                    "product_name": product_name,
                     "size": size.size if size else None,
-
-                    "action": log.action,
-
-                    "from_entity": from_entity,
-                    "to_entity": to_entity,
-
+                    "description": desc,
+                    "type": tx_category,
                     "quantity": log.quantity,
                     "balance_after": log.balance_after,
-
-                    "reference_type": log.reference_type,
-                    "reference_id": log.reference_id,
-
                     "created_at": created_at
-
                 })
 
             return jsonify(result), 200
 
         except Exception as e:
-
-            print("ADMIN LEDGER ERROR:", str(e))
-
-            return jsonify({
-                "error": "Failed to load inventory ledger",
-                "details": str(e)
-            }), 500
+            print("LEDGER ERROR:", str(e))
+            return jsonify({"error": str(e)}), 500
             
     @app.route('/api/admin/school-overview', methods=['GET'])
     @jwt_required()
@@ -8237,7 +8215,6 @@ def create_app():
 
         user = get_current_user()
 
-        # Products seller can request from school
         mappings = SellerSchoolProduct.query.filter_by(
             seller_id=user.seller_id
         ).all()
@@ -8247,18 +8224,15 @@ def create_app():
         for mapping in mappings:
 
             product = Product.query.get(mapping.product_id)
-
-            if not product:
-                continue
-
             school = mapping.school
 
-            if product.id not in products_map:
+            if not product or not school:
+                continue
 
+            if product.id not in products_map:
                 products_map[product.id] = {
                     "product_id": product.id,
                     "name": product.name,
-                    "school_id": school.id if school else None,
                     "sizes": []
                 }
 
@@ -8266,8 +8240,8 @@ def create_app():
                 product_id=product.id
             ).all()
 
+            # CASE 1: Product has sizes
             if sizes:
-
                 for size in sizes:
 
                     inventories = SchoolInventory.query.filter_by(
@@ -8279,12 +8253,14 @@ def create_app():
                     stock = sum(i.quantity for i in inventories)
 
                     products_map[product.id]["sizes"].append({
-                        "size_id": None,
-                        "size": "Standard",
+                        "size_id": size.id,
+                        "size": size.size,
                         "school_id": school.id,
+                        "school_name": school.name,   # ✅ IMPORTANT
                         "school_stock": stock
                     })
 
+            # CASE 2: No sizes (Standard product)
             else:
 
                 inventories = SchoolInventory.query.filter_by(
@@ -8296,9 +8272,10 @@ def create_app():
                 stock = sum(i.quantity for i in inventories)
 
                 products_map[product.id]["sizes"].append({
-                    "size_id": size.id,
-                    "size": size.size,
+                    "size_id": None,
+                    "size": "Standard",
                     "school_id": school.id,
+                    "school_name": school.name,   # ✅ IMPORTANT
                     "school_stock": stock
                 })
 
