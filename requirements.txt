@@ -7,3 +7,4 @@ razorpay
 psycopg2-binary
 cloudinary
 dotenv
+reportlab
