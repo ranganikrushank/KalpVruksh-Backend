@@ -474,14 +474,14 @@ class Order(db.Model):
 
     student_id = db.Column(db.Integer, db.ForeignKey('users.id'), nullable=True)
 
-    # ⭐ ADD THIS
+    # Relationship
     student = db.relationship("User", foreign_keys=[student_id])
 
     school_id = db.Column(db.Integer, db.ForeignKey("schools.id"), nullable=False)
 
     total_amount = db.Column(db.Float, default=0.0)
 
-    status = db.Column(db.String(50), default="pending")
+    status = db.Column(db.String(50), default="PENDING")
 
     payment_status = db.Column(db.String(50), default="PENDING")
 
@@ -497,7 +497,107 @@ class Order(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     completed_at = db.Column(db.DateTime)
 
+    # ===============================
+    # 🔥 NEW FIELDS
+    # ===============================
+    commission_added = db.Column(db.Boolean, default=False)
+    returned = db.Column(db.Boolean, default=False)
+
+    # Relationships
     items = db.relationship("OrderItem", backref="order", lazy=True)
+
+    # ===================================================
+    # 💰 ADD COMMISSION
+    # ===================================================
+    def add_commission_to_school(self):
+        """
+        Call ONLY when order is completed
+        """
+        from models import School
+
+        if self.commission_added:
+            return 0
+
+        school = db.session.get(School, self.school_id)
+
+        if not school:
+            return 0
+
+        commission = (self.total_amount * school.commission_percentage) / 100
+
+        school.coin_balance += commission
+
+        self.commission_added = True
+
+        return commission
+
+    # ===================================================
+    # 🔁 REVERSE COMMISSION (FOR RETURN)
+    # ===================================================
+    def reverse_commission(self):
+        """
+        Call ONLY when order is returned
+        """
+        from models import School
+
+        if not self.commission_added:
+            return 0
+
+        school = db.session.get(School, self.school_id)
+
+        if not school:
+            return 0
+
+        commission = (self.total_amount * school.commission_percentage) / 100
+
+        school.coin_balance -= commission
+
+        return commission
+
+    # ===================================================
+    # 📦 RESTORE STOCK (FOR RETURN)
+    # ===================================================
+    def restore_inventory(self):
+        """
+        Add stock back to SchoolInventory
+        """
+        from models import SchoolInventory
+
+        for item in self.items:
+            inventory = SchoolInventory.query.filter_by(
+                school_id=self.school_id,
+                product_id=item.product_id,
+                size_id=item.size_id
+            ).first()
+
+            if inventory:
+                inventory.quantity += item.quantity
+                inventory.total_adjusted += item.quantity
+
+    # ===================================================
+    # 🔥 COMPLETE RETURN PROCESS (MAIN METHOD)
+    # ===================================================
+    def process_return(self):
+        """
+        Full return logic:
+        - restore stock
+        - reverse commission
+        - mark returned
+        """
+        if self.returned:
+            return 0
+
+        # Restore stock
+        self.restore_inventory()
+
+        # Reverse commission
+        commission = self.reverse_commission()
+
+        # Mark returned
+        self.returned = True
+        self.status = "RETURNED"
+
+        return commission
 
 
 class OrderItem(db.Model):
@@ -557,7 +657,36 @@ class StaffOrder(db.Model):
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     completed_at = db.Column(db.DateTime)
 
+    # 🔥 NEW FIELD (IMPORTANT)
+    commission_added = db.Column(db.Boolean, default=False)
+
+    # Relationships
     items = db.relationship("StaffOrderItem", backref="staff_order", lazy=True)
+
+    # ===============================
+    # HELPER METHOD (FOR COMMISSION)
+    # ===============================
+    def add_commission_to_school(self):
+        """
+        Call this ONLY when staff order is completed
+        """
+        from models import School  # adjust import path if needed
+
+        if self.commission_added:
+            return 0  # prevent duplicate commission
+
+        school = db.session.get(School, self.school_id)
+
+        if not school:
+            return 0
+
+        commission = (self.total_amount * school.commission_percentage) / 100
+
+        school.coin_balance += commission
+
+        self.commission_added = True
+
+        return commission
 
 
 class StaffOrderItem(db.Model):
@@ -743,7 +872,10 @@ class InventoryLedger(db.Model):
 
     id = db.Column(db.Integer, primary_key=True)
 
-    product_id = db.Column(db.Integer, db.ForeignKey("products.id"))
+    # =========================================
+    # OPTIONAL PRODUCT CONTEXT (NOT ALWAYS NEEDED)
+    # =========================================
+    product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=True)
 
     size_id = db.Column(
         db.Integer,
@@ -751,23 +883,55 @@ class InventoryLedger(db.Model):
         nullable=True
     )
 
+    # =========================================
+    # OWNER (VERY IMPORTANT)
+    # =========================================
     seller_id = db.Column(db.Integer, db.ForeignKey("sellers.id"), nullable=True)
     school_id = db.Column(db.Integer, db.ForeignKey("schools.id"), nullable=True)
 
-    action = db.Column(db.String(100))
+    # =========================================
+    # TRANSACTION DETAILS
+    # =========================================
+    action = db.Column(db.String(100))  
+    # e.g. ORDER_PAYMENT, COMMISSION_EARNED, ORDER_REFUND
 
-    quantity = db.Column(db.Integer)
+    transaction_type = db.Column(db.String(10))  
+    # CREDIT / DEBIT
+
+    description = db.Column(db.String(255))  
+    # Human readable: "Order #12 Payment", "Commission Earned"
+
+    # =========================================
+    # AMOUNT DETAILS
+    # =========================================
+    quantity = db.Column(db.Integer)  
+    # amount of coins (+ or - handled via type)
+
     balance_after = db.Column(db.Integer)
 
-    reference_type = db.Column(db.String(50))
+    # =========================================
+    # TRACEABILITY
+    # =========================================
+    reference_type = db.Column(db.String(50))  
+    # ORDER / STOCK / MANUAL
+
     reference_id = db.Column(db.Integer)
 
+    # =========================================
+    # TIMESTAMP
+    # =========================================
     created_at = db.Column(
         db.DateTime,
         default=lambda: datetime.now(timezone.utc)
     )
 
+    # =========================================
+    # RELATIONS
+    # =========================================
     size = db.relationship("ProductSize")
+
+    def __repr__(self):
+        return f"<Ledger {self.action} {self.transaction_type} {self.quantity}>"
     
 
 from datetime import datetime

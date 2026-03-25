@@ -45,19 +45,35 @@ def record_inventory(
     seller_id=None,
     school_id=None,
     reference_type=None,
-    reference_id=None
+    reference_id=None,
+
+    # 🔥 NEW OPTIONAL FIELDS (SAFE ADDITION)
+    description=None,
+    transaction_type=None
 ):
+    from datetime import datetime, timezone
 
     tx = InventoryLedger(
         product_id=product_id,
         size_id=size_id,
+
         seller_id=seller_id,
         school_id=school_id,
+
         action=action,
         quantity=quantity,
+
+        # ✅ KEEP YOUR EXISTING LOGIC
         balance_after=balance,
+
         reference_type=reference_type,
-        reference_id=reference_id
+        reference_id=reference_id,
+
+        # 🔥 SAFE ADDITIONS (WILL NOT BREAK ANYTHING)
+        description=description,
+        transaction_type=transaction_type,
+
+        created_at=datetime.now(timezone.utc)
     )
 
     db.session.add(tx)
@@ -206,16 +222,13 @@ def create_app():
     #         queries = [
 
     #             # ====================================
-    #             # ✅ FIX seller_payments.product_id
+    #             # ✅ seller_payments FIX
     #             # ====================================
-
-    #             # Drop NOT NULL constraint
     #             """
     #             ALTER TABLE seller_payments
     #             ALTER COLUMN product_id DROP NOT NULL;
     #             """,
 
-    #             # Allow NULL safely (FK still valid)
     #             """
     #             ALTER TABLE seller_payments
     #             DROP CONSTRAINT IF EXISTS seller_payments_product_id_fkey;
@@ -227,7 +240,110 @@ def create_app():
     #             FOREIGN KEY (product_id)
     #             REFERENCES products(id)
     #             ON DELETE SET NULL;
+    #             """,
+
+    #             # ====================================
+    #             # ✅ ORDERS UPGRADE
+    #             # ====================================
     #             """
+    #             ALTER TABLE orders
+    #             ADD COLUMN IF NOT EXISTS commission_added BOOLEAN DEFAULT FALSE;
+    #             """,
+
+    #             """
+    #             ALTER TABLE orders
+    #             ADD COLUMN IF NOT EXISTS returned BOOLEAN DEFAULT FALSE;
+    #             """,
+
+    #             # ====================================
+    #             # ✅ STAFF ORDERS
+    #             # ====================================
+    #             """
+    #             ALTER TABLE staff_orders
+    #             ADD COLUMN IF NOT EXISTS commission_added BOOLEAN DEFAULT FALSE;
+    #             """,
+
+    #             # ====================================
+    #             # 🔥 INVENTORY LEDGER UPGRADE
+    #             # ====================================
+
+    #             """
+    #             ALTER TABLE inventory_ledger
+    #             ADD COLUMN IF NOT EXISTS transaction_type VARCHAR(10);
+    #             """,
+
+    #             """
+    #             ALTER TABLE inventory_ledger
+    #             ADD COLUMN IF NOT EXISTS description VARCHAR(255);
+    #             """,
+
+    #             # ====================================
+    #             # 🚨 CRITICAL DATA CLEANUP (VERY IMPORTANT)
+    #             # ====================================
+
+    #             # ❌ Remove wrong old entries
+    #             """
+    #             DELETE FROM inventory_ledger
+    #             WHERE action IN ('STUDENT_PURCHASE', 'STAFF_PURCHASE');
+    #             """,
+
+    #             # ❌ Remove empty / broken rows
+    #             """
+    #             DELETE FROM inventory_ledger
+    #             WHERE description IS NULL OR description = '';
+    #             """,
+
+    #             # ====================================
+    #             # ✅ FIX EXISTING DATA
+    #             # ====================================
+
+    #             # Set CREDIT where missing
+    #             """
+    #             UPDATE inventory_ledger
+    #             SET transaction_type = 'CREDIT'
+    #             WHERE transaction_type IS NULL;
+    #             """,
+
+    #             # Fix negative/positive mismatch
+    #             """
+    #             UPDATE inventory_ledger
+    #             SET transaction_type = 'DEBIT'
+    #             WHERE quantity < 0;
+    #             """,
+
+    #             # Make quantities always positive (UI handles +/-)
+    #             """
+    #             UPDATE inventory_ledger
+    #             SET quantity = ABS(quantity);
+    #             """,
+
+    #             # ====================================
+    #             # 🚀 INDEXES
+    #             # ====================================
+
+    #             """
+    #             CREATE INDEX IF NOT EXISTS idx_ledger_school
+    #             ON inventory_ledger (school_id);
+    #             """,
+
+    #             """
+    #             CREATE INDEX IF NOT EXISTS idx_ledger_created_at
+    #             ON inventory_ledger (created_at DESC);
+    #             """,
+
+    #             """
+    #             CREATE INDEX IF NOT EXISTS idx_ledger_reference
+    #             ON inventory_ledger (reference_type, reference_id);
+    #             """,
+
+    #             # ====================================
+    #             # ✅ DEFAULTS
+    #             # ====================================
+
+    #             """
+    #             ALTER TABLE inventory_ledger
+    #             ALTER COLUMN transaction_type SET DEFAULT 'CREDIT';
+    #             """,
     #         ]
 
     #         for q in queries:
@@ -237,7 +353,7 @@ def create_app():
 
     #         return {
     #             "success": True,
-    #             "message": "seller_payments table fixed successfully"
+    #             "message": "DB cleaned + upgraded successfully (ledger fixed)"
     #         }
 
     #     except Exception as e:
@@ -246,6 +362,45 @@ def create_app():
     #             "success": False,
     #             "error": str(e)
     #         }
+    
+    # from sqlalchemy import text
+
+    # @app.route('/reset-database', methods=['GET', 'POST'])
+    # def reset_database():
+    #     try:
+
+    #         if os.getenv("ENV") == "production":
+    #             return {"error": "Not allowed in production"}, 403
+
+    #         db.session.execute(text("""
+    #             DO $$ 
+    #             DECLARE 
+    #                 r RECORD;
+    #             BEGIN
+    #                 FOR r IN (
+    #                     SELECT tablename 
+    #                     FROM pg_tables 
+    #                     WHERE schemaname = 'public'
+    #                 )
+    #                 LOOP
+    #                     EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';
+    #                 END LOOP;
+    #             END $$;
+    #         """))
+
+    #         db.session.commit()
+
+    #         return {
+    #             "success": True,
+    #             "message": "🚀 Database fully reset"
+    #         }
+
+    #     except Exception as e:
+    #         db.session.rollback()
+    #         return {
+    #             "success": False,
+    #             "error": str(e)
+    #         }, 500
     
     @app.route("/check-db")
     def check_db():
@@ -1812,7 +1967,7 @@ def create_app():
         try:
             user = get_current_user()
 
-            order = Order.query.get(order_id)
+            order = db.session.get(Order, order_id)
 
             if not order:
                 return jsonify({"error": "Order not found"}), 404
@@ -1820,21 +1975,294 @@ def create_app():
             if order.school_id != user.school_id:
                 return jsonify({"error": "Unauthorized"}), 403
 
-            if order.status != "READY_FOR_HANDOVER":
-                return jsonify({"error": "Order not ready for handover"}), 400
+            if order.status == "COMPLETED":
+                return jsonify({"message": "Order already Completed"}), 200
 
-            order.status = "HANDED_OVER"
-            order.handed_over_at = datetime.now(timezone.utc)
+            now = datetime.now(timezone.utc)
+
+            # ====================================
+            # 🔥 STOCK LEDGER (FIXED)
+            # ====================================
+            for item in order.items:
+
+                inventory = SchoolInventory.query.filter_by(
+                    school_id=order.school_id,
+                    product_id=item.product_id,
+                    size_id=item.size_id
+                ).first()
+
+                if not inventory:
+                    continue
+
+                # ✅ SAFE LEDGER ENTRY
+                record_inventory(
+                    product_id=item.product_id,
+                    size_id=item.size_id,
+
+                    action="SOLD_TO_STUDENT",
+
+                    quantity=-item.quantity,
+                    balance=inventory.quantity,   # ✅ FIXED
+
+                    school_id=order.school_id,
+
+                    description=f"School → Student (Order #{order.id})",
+
+                    transaction_type="DEBIT",
+
+                    reference_type="Order",
+                    reference_id=order.id
+                )
+
+            # ====================================
+            # ✅ MARK AS COMPLETED
+            # ====================================
+            order.status = "COMPLETED"
+            order.handed_over_at = now
+            order.completed_at = now
+
+            # ====================================
+            # 🔥 ADD COMMISSION
+            # ====================================
+            commission = order.add_commission_to_school()
+
+            school = db.session.get(School, order.school_id)  # ✅ ALWAYS DEFINE
+
+            # ====================================
+            # 🔥 COIN LEDGER
+            # ====================================
+            if commission > 0:
+                ledger = InventoryLedger(
+                    school_id=school.id,
+                    action="COMMISSION_EARNED",
+                    transaction_type="CREDIT",
+                    description=f"Commission earned from Order #{order.id}",
+                    quantity=commission,
+                    balance_after=school.coin_balance,
+                    reference_type="ORDER",
+                    reference_id=order.id,
+                    created_at=now
+                )
+                db.session.add(ledger)
 
             db.session.commit()
 
             return jsonify({
-                "message": "Order marked as handed over"
+                "message": "Order marked as handed over",
+                "commission_added": commission,
+                "new_balance": school.coin_balance   # ✅ SAFE NOW
             }), 200
 
         except Exception as e:
             db.session.rollback()
-            return jsonify({"error": "Failed to update order"}), 500
+            print("ERROR:", str(e))  # 👈 IMPORTANT DEBUG
+            return jsonify({
+                "error": "Failed to update order",
+                "details": str(e)
+            }), 500
+            
+    def get_transaction_description(log):
+    
+        seller = db.session.get(Seller, log.seller_id) if log.seller_id else None
+        school = db.session.get(School, log.school_id) if log.school_id else None
+
+        # 🔥 SELLER → SCHOOL
+        if log.action == "SCHOOL_RECEIVED":
+            return f"{seller.name if seller else 'Seller'} → {school.name if school else 'School'}"
+
+        # 🔥 SCHOOL → STUDENT
+        elif log.action == "SOLD_TO_STUDENT":
+            return f"{school.name if school else 'School'} → Student (Order #{log.reference_id})"
+
+        # 🔥 SCHOOL → STAFF
+        elif log.action == "SOLD_TO_STAFF":
+            return f"{school.name if school else 'School'} → Staff"
+
+        # 🔥 SCHOOL → SELLER (RETURN)
+        elif log.action == "RETURN_TO_SELLER":
+            return f"{school.name if school else 'School'} → {seller.name if seller else 'Seller'}"
+
+        # 🔥 DEFAULT
+        return log.description if log.description else "Stock Update"
+            
+    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, HRFlowable
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.units import inch
+    from flask import request, send_file
+    from io import BytesIO
+    from collections import defaultdict
+
+    @app.route("/api/admin/inventory-ledger/download", methods=["GET"])
+    @jwt_required()
+    def download_inventory_ledger():
+        product_filter = request.args.get("product")
+
+        # Fetch logs
+        logs = InventoryLedger.query.filter(InventoryLedger.product_id.isnot(None)).all()
+
+        # Grouping Logic
+        grouped = defaultdict(list)
+        for log in logs:
+            product = db.session.get(Product, log.product_id)
+            if not product: continue
+            if product_filter and product.name != product_filter: continue
+            grouped[product.name].append(log)
+
+        buffer = BytesIO()
+        doc = SimpleDocTemplate(
+            buffer,
+            pagesize=A4,
+            rightMargin=40,
+            leftMargin=40,
+            topMargin=40,
+            bottomMargin=30
+        )
+
+        styles = getSampleStyleSheet()
+        
+        # --- MODERN CUSTOM STYLES ---
+        primary_color = colors.HexColor("#1E293B")  # Deep Slate
+        accent_color = colors.HexColor("#3B82F6")   # Professional Blue
+        bg_light = colors.HexColor("#F8FAFC")      # Soft Grey/White
+        
+        title_style = ParagraphStyle(
+            'MainTitle',
+            parent=styles['Title'],
+            fontSize=22,
+            textColor=primary_color,
+            spaceAfter=12,
+            alignment=1, # Center
+            fontName='Helvetica-Bold'
+        )
+
+        product_header_style = ParagraphStyle(
+            'ProductHeader',
+            parent=styles['Heading2'],
+            fontSize=16,
+            textColor=primary_color,
+            borderPadding=5,
+            spaceBefore=20,
+            spaceAfter=10
+        )
+
+        elements = []
+
+        # =========================================
+        # 1. HEADER SECTION
+        # =========================================
+        try:
+            logo = Image("static/logo.png", width=1.2*inch, height=0.5*inch)
+            logo.hAlign = 'LEFT'
+            elements.append(logo)
+        except:
+            elements.append(Paragraph("<b>INVENTORY MGMT</b>", styles['Normal']))
+
+        elements.append(Paragraph("Stock Ledger Statement", title_style))
+        elements.append(HRFlowable(width="100%", thickness=1, color=primary_color, spaceAfter=20))
+
+        # =========================================
+        # 2. DATA RENDERING
+        # =========================================
+        for product_name, product_logs in grouped.items():
+            
+            # Product Title with a nice underline effect
+            elements.append(Paragraph(f"PRODUCT: {product_name.upper()}", product_header_style))
+
+            size_group = defaultdict(list)
+            for log in product_logs:
+                size_obj = db.session.get(ProductSize, log.size_id)
+                size_name = size_obj.size if size_obj else "N/A"
+                size_group[size_name].append(log)
+
+            for size_name in sorted(size_group.keys()):
+                logs_by_size = size_group[size_name]
+                logs_by_size.sort(key=lambda x: x.created_at or 0)
+
+                elements.append(Paragraph(f"<b>Variation:</b> Size {size_name}", styles['Normal']))
+                elements.append(Spacer(1, 8))
+
+                # Table Header
+                data = [["DATE", "DESCRIPTION", "MOVEMENT", "BALANCE"]]
+                
+                running_balance = 0
+                # Opening Balance Row
+                data.append(["-", "Initial Opening Balance", "0", "0"])
+
+                for log in logs_by_size:
+                    running_balance += log.quantity
+                    date_str = log.created_at.strftime("%d %b %Y") if log.created_at else "-"
+                    
+                    # Format quantity for better visuals
+                    qty_display = f"+{log.quantity}" if log.quantity > 0 else str(log.quantity)
+
+                    data.append([
+                        date_str,
+                        get_transaction_description(log),
+                        qty_display,
+                        str(running_balance)
+                    ])
+
+                # Closing Balance Row
+                data.append(["", "FINAL CLOSING STOCK", "", str(running_balance)])
+
+                # TABLE DESIGN
+                # Column widths: Date(80), Desc(220), Qty(90), Balance(90)
+                table = Table(data, colWidths=[80, 230, 90, 90], repeatRows=1)
+
+                table_style = TableStyle([
+                    # Header Style
+                    ('BACKGROUND', (0, 0), (-1, 0), primary_color),
+                    ('TEXTCOLOR', (0, 0), (-1, 0), colors.white),
+                    ('ALIGN', (0, 0), (-1, 0), 'CENTER'),
+                    ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                    ('FONTSIZE', (0, 0), (-1, 0), 10),
+                    ('BOTTOMPADDING', (0, 0), (-1, 0), 10),
+                    ('TOPPADDING', (0, 0), (-1, 0), 10),
+
+                    # Body General Style
+                    ('GRID', (0, 0), (-1, -2), 0.5, colors.HexColor("#CBD5E1")),
+                    ('FONTSIZE', (0, 1), (-1, -1), 9),
+                    ('VALIGN', (0, 0), (-1, -1), 'MIDDLE'),
+                    ('LEFTPADDING', (0, 0), (-1, -1), 10),
+                    ('RIGHTPADDING', (0, 0), (-1, -1), 10),
+                    ('BOTTOMPADDING', (0, 1), (-1, -1), 8),
+                    ('TOPPADDING', (0, 1), (-1, -1), 8),
+                    
+                    # Alternate Row Colors
+                    ('ROWBACKGROUNDS', (0, 1), (-1, -2), [colors.white, bg_light]),
+
+                    # Align Numbers to the Right
+                    ('ALIGN', (2, 1), (3, -1), 'RIGHT'),
+
+                    # Closing Balance Styling (Last Row)
+                    ('BACKGROUND', (0, -1), (-1, -1), colors.HexColor("#E2E8F0")),
+                    ('FONTNAME', (0, -1), (-1, -1), 'Helvetica-Bold'),
+                    ('LINEABOVE', (0, -1), (-1, -1), 1, primary_color),
+                ])
+
+                # Conditional Formatting (Green for In, Red for Out)
+                for i, row in enumerate(data[1:-1], start=1):
+                    val = row[2]
+                    if "-" in val:
+                        table_style.add('TEXTCOLOR', (2, i), (2, i), colors.HexColor("#B91C1C")) # Soft Red
+                    elif "+" in val:
+                        table_style.add('TEXTCOLOR', (2, i), (2, i), colors.HexColor("#15803D")) # Soft Green
+
+                table.setStyle(table_style)
+                elements.append(table)
+                elements.append(Spacer(1, 20))
+
+        doc.build(elements)
+        buffer.seek(0)
+
+        return send_file(
+            buffer,
+            as_attachment=True,
+            download_name=f"Inventory_Ledger_{product_filter or 'All'}.pdf",
+            mimetype="application/pdf"
+        )
         
     @app.route('/api/admin/all-student-orders', methods=['GET'])
     @jwt_required()
@@ -2611,8 +3039,12 @@ def create_app():
                 if school.coin_balance < total_amount:
                     return jsonify({"error": "Insufficient coins"}), 400
 
+                # ✅ Deduct coins (THIS WAS ALREADY CORRECT)
                 school.coin_balance -= total_amount
 
+                # ===============================
+                # 📦 PROCESS ITEMS (NO LEDGER HERE)
+                # ===============================
                 for entry in order_items_buffer:
 
                     item = entry["item"]
@@ -2620,6 +3052,7 @@ def create_app():
                     quantity = entry["quantity"]
                     total_price = entry["total_price"]
 
+                    # 🔻 Reduce stock
                     inventory.sell_stock(quantity)
 
                     if category_enum == CategoryType.STUDENT:
@@ -2628,8 +3061,6 @@ def create_app():
                             product_id=item["product_id"],
                             school_id=school.id
                         ).first()
-
-                        print("Mapping Found:", mapping)
 
                         if not mapping:
                             return jsonify({
@@ -2646,8 +3077,6 @@ def create_app():
                             total_price=total_price
                         )
 
-                        ledger_action = "STUDENT_PURCHASE"
-
                     else:
                         order_item = StaffOrderItem(
                             staff_order_id=order.id,
@@ -2658,23 +3087,33 @@ def create_app():
                             total_price=total_price
                         )
 
-                        ledger_action = "STAFF_PURCHASE"
-
                     db.session.add(order_item)
 
-                    ledger = InventoryLedger(
-                        product_id=item["product_id"],
-                        school_id=school.id,
-                        action=ledger_action,
-                        quantity=-quantity,
-                        balance_after=inventory.quantity,
-                        reference_type="ORDER",
-                        reference_id=order.id,
-                        created_at=datetime.now(timezone.utc)
-                    )
+                # ===============================
+                # 💰 CORRECT WALLET LEDGER (ONLY ONCE)
+                # ===============================
+                ledger = InventoryLedger(
+                    school_id=school.id,
 
-                    db.session.add(ledger)
+                    action="ORDER_PAYMENT",                 # ✅ correct label
+                    transaction_type="DEBIT",               # ✅ important
 
+                    description=f"Coins used for Order #{order.id}",
+
+                    quantity=total_amount,                  # ✅ FULL COIN AMOUNT
+                    balance_after=school.coin_balance,      # ✅ WALLET BALANCE
+
+                    reference_type="ORDER",
+                    reference_id=order.id,
+
+                    created_at=datetime.now(timezone.utc)
+                )
+
+                db.session.add(ledger)
+
+                # ===============================
+                # ✅ UPDATE ORDER
+                # ===============================
                 order.total_amount = total_amount
                 order.status = "PAID"
 
@@ -2739,6 +3178,28 @@ def create_app():
 
                     db.session.add(order_item)
 
+                # ====================================
+                # 💰 SINGLE WALLET LEDGER ENTRY
+                # ====================================
+                ledger = InventoryLedger(
+                    school_id=school.id,
+
+                    action="ORDER_PAYMENT",
+                    transaction_type="DEBIT",
+
+                    description=f"Coins used for Order #{order.id}",
+
+                    quantity=total_amount,                 # ✅ FULL AMOUNT
+                    balance_after=school.coin_balance,     # ✅ WALLET BALANCE
+
+                    reference_type="ORDER",
+                    reference_id=order.id,
+
+                    created_at=datetime.now(timezone.utc)
+                )
+
+                db.session.add(ledger)
+                
                 order.total_amount = total_amount
                 order.status = "PENDING"
 
@@ -2781,6 +3242,147 @@ def create_app():
                 "details": str(e)
             }), 500
 
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Image, Spacer
+    from reportlab.lib import colors
+    from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from io import BytesIO
+    from reportlab.lib.units import inch
+    from flask import send_file
+
+    @app.route("/api/school/coin-statement-pdf", methods=["GET"])
+    @jwt_required()
+    @role_required(UserRole.SCHOOL)
+    def download_coin_statement_pdf():
+        try:
+            user = get_current_user()
+            school = db.session.get(School, user.school_id)
+            school_name = school.name if school and school.name else "School"
+            entries = InventoryLedger.query.filter_by(
+                school_id=user.school_id
+            ).order_by(InventoryLedger.created_at.desc()).all()
+
+            buffer = BytesIO()
+            # Set margins for a more spacious feel
+            doc = SimpleDocTemplate(buffer, pagesize=A4, rightMargin=30, leftMargin=30, topMargin=30, bottomMargin=30)
+            
+            styles = getSampleStyleSheet()
+            elements = []
+
+            # 1. Custom Professional Styles
+            title_style = ParagraphStyle(
+                'CustomTitle',
+                parent=styles['Heading1'],
+                fontSize=18,
+                textColor=colors.HexColor("#1A237E"), # Deep Navy Blue
+                spaceAfter=12,
+                alignment=1 # Center
+            )
+            
+            subtitle_style = ParagraphStyle(
+                'Subtitle',
+                parent=styles['Normal'],
+                fontSize=10,
+                textColor=colors.grey,
+                alignment=1
+            )
+            
+            school_style = ParagraphStyle(
+                'SchoolName',
+                parent=styles['Normal'],
+                fontSize=12,
+                textColor=colors.HexColor("#444444"),
+                alignment=1,
+                spaceAfter=10
+            )
+
+            # 2. Header / Logo Section
+            logo_path = "static/logo.png"
+            try:
+                logo = Image(logo_path, width=2*inch, height=0.8*inch)
+                logo.hAlign = 'CENTER'
+                elements.append(logo)
+            except:
+                elements.append(Spacer(1, 0.5*inch)) # Placeholder if logo fails
+
+            elements.append(Paragraph("<b>COIN TRANSACTION STATEMENT</b>", title_style))
+            elements.append(Paragraph(f"Generated on: {entries[0].created_at.strftime('%d %b %Y') if entries else 'N/A'}", subtitle_style))
+            elements.append(Spacer(1, 25))
+            elements.append(Paragraph(f"<b>School: {school_name}</b>", school_style))
+            elements.append(Spacer(1, 25))
+
+            # 3. Table Data Preparation
+            # We use Paragraphs inside cells for better text wrapping and color control
+            data = [[
+                Paragraph("<b>Date</b>", styles['Normal']),
+                Paragraph("<b>Description</b>", styles['Normal']),
+                Paragraph("<b>Amount</b>", styles['Normal']),
+                Paragraph("<b>Balance</b>", styles['Normal'])
+            ]]
+
+            for i, e in enumerate(entries):
+                # Color logic for Credit vs Debit
+                is_credit = e.transaction_type == "CREDIT"
+                amount_val = f"+{e.quantity}" if is_credit else f"-{e.quantity}"
+                amount_color = "#2E7D32" if is_credit else "#C62828" # Green vs Red
+
+                data.append([
+                    e.created_at.strftime("%d %b %Y"),
+                    e.description or e.action,
+                    Paragraph(f"<font color='{amount_color}'><b>{amount_val}</b></font>", styles['Normal']),
+                    f"{e.balance_after}"
+                ])
+
+            # 4. Table Styling (The "Pro" Look)
+            # Defining column widths for A4 (approx 530 points available)
+            col_widths = [1.2*inch, 2.8*inch, 1.2*inch, 1.2*inch]
+            table = Table(data, colWidths=col_widths)
+
+            table_style = TableStyle([
+                # Header Styling
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#F5F5F5")),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor("#333333")),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                
+                # Row Styling
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 10),
+                ('TOPPADDING', (0, 1), (-1, -1), 10),
+                
+                # Zebra Striping (Light grey background for even rows)
+                *[('BACKGROUND', (0, i), (-1, i), colors.HexColor("#FAFAFA")) for i in range(2, len(data), 2)],
+                
+                # Borders (Thin line at the bottom of each row for a clean look)
+                ('LINEBELOW', (0, 0), (-1, -1), 0.5, colors.HexColor("#EEEEEE")),
+                ('LINEBELOW', (0, 0), (-1, 0), 1.5, colors.HexColor("#1A237E")), # Thick line under header
+            ])
+
+            table.setStyle(table_style)
+            elements.append(table)
+
+            # 5. Footer
+            elements.append(Spacer(1, 40))
+            footer_note = Paragraph("<i>This is a computer-generated statement and does not require a signature.</i>", subtitle_style)
+            elements.append(footer_note)
+
+            doc.build(elements)
+            buffer.seek(0)
+            
+            safe_name = school_name.replace(" ", "_")
+            
+            return send_file(
+                buffer,
+                as_attachment=True,
+                download_name=f"{safe_name}_Coin_Statement.pdf",
+                mimetype="application/pdf"
+            )
+
+        except Exception as e:
+            return {"error": str(e)}, 500
+    
     from datetime import datetime
     from calendar import monthrange
     from sqlalchemy import func
@@ -2956,6 +3558,301 @@ def create_app():
         except Exception as e:
             print("Revenue Dashboard Error:", str(e))
             return jsonify({"error": "Failed to load revenue dashboard"}), 500
+    
+    @app.route("/api/admin/school-coin-statement/<int:school_id>", methods=["GET"])
+    @jwt_required()
+    @role_required(UserRole.SUPER_ADMIN)
+    def admin_school_coin_statement(school_id):
+
+        try:
+            # ====================================
+            # 🧠 GET SCHOOL (REAL BALANCE)
+            # ====================================
+            school = db.session.get(School, school_id)
+
+            # ====================================
+            # 📊 FETCH LEDGER
+            # ====================================
+            entries = (
+                InventoryLedger.query
+                .filter_by(school_id=school_id)
+                .order_by(InventoryLedger.created_at.desc())
+                .all()
+            )
+
+            result = []
+
+            for e in entries:
+                result.append({
+                    "id": e.id,
+                    "action": e.action,
+                    "type": e.transaction_type,
+                    "description": e.description,
+                    "amount": e.quantity,
+                    "balance_after": e.balance_after,
+                    "created_at": e.created_at.isoformat()
+                })
+
+            # ====================================
+            # ✅ FINAL RESPONSE
+            # ====================================
+            return jsonify({
+                "total_records": len(result),
+                "balance": school.coin_balance if school else 0,  # 🔥 CRITICAL FIX
+                "data": result
+            }), 200
+
+        except Exception as e:
+            return {
+                "error": "Failed to fetch admin coin statement",
+                "details": str(e)
+            }, 500
+    
+    @app.route("/api/admin/school-coin-statement-pdf/<int:school_id>", methods=["GET"])
+    @jwt_required()
+    @role_required(UserRole.SUPER_ADMIN)
+    def admin_download_coin_statement_pdf(school_id):
+        try:
+            user = get_current_user()
+            school = db.session.get(School, school_id)
+            school_name = school.name if school and school.name else "School"
+
+            entries = InventoryLedger.query.filter_by(
+                school_id=school_id
+            ).order_by(InventoryLedger.created_at.desc()).all()
+
+            # ====================================
+            # 💰 SUMMARY CALCULATIONS (NEW)
+            # ====================================
+            current_balance = school.coin_balance if school else 0
+
+            total_credit = sum(
+                e.quantity for e in entries if e.transaction_type == "CREDIT"
+            )
+
+            total_debit = sum(
+                e.quantity for e in entries if e.transaction_type == "DEBIT"
+            )
+
+            buffer = BytesIO()
+
+            doc = SimpleDocTemplate(
+                buffer,
+                pagesize=A4,
+                rightMargin=30,
+                leftMargin=30,
+                topMargin=30,
+                bottomMargin=30
+            )
+
+            styles = getSampleStyleSheet()
+            elements = []
+
+            # ====================================
+            # 🎨 STYLES
+            # ====================================
+            title_style = ParagraphStyle(
+                'CustomTitle',
+                parent=styles['Heading1'],
+                fontSize=18,
+                textColor=colors.HexColor("#1A237E"),
+                spaceAfter=12,
+                alignment=1
+            )
+
+            subtitle_style = ParagraphStyle(
+                'Subtitle',
+                parent=styles['Normal'],
+                fontSize=10,
+                textColor=colors.grey,
+                alignment=1
+            )
+
+            school_style = ParagraphStyle(
+                'SchoolName',
+                parent=styles['Normal'],
+                fontSize=12,
+                textColor=colors.HexColor("#444444"),
+                alignment=1,
+                spaceAfter=10
+            )
+
+            # ====================================
+            # 🏢 HEADER
+            # ====================================
+            logo_path = "static/logo.png"
+            try:
+                logo = Image(logo_path, width=2*inch, height=0.8*inch)
+                logo.hAlign = 'CENTER'
+                elements.append(logo)
+            except:
+                elements.append(Spacer(1, 0.5*inch))
+
+            elements.append(Paragraph("<b>COIN TRANSACTION STATEMENT</b>", title_style))
+            elements.append(Paragraph(
+                f"Generated on: {entries[0].created_at.strftime('%d %b %Y') if entries else 'N/A'}",
+                subtitle_style
+            ))
+
+            elements.append(Spacer(1, 25))
+            elements.append(Paragraph(f"<b>School: {school_name}</b>", school_style))
+            elements.append(Spacer(1, 20))
+
+            # ====================================
+            # 📊 SUMMARY SECTION (NEW)
+            # ====================================
+            summary_data = [
+                ["Current Balance", f"{current_balance}"],
+                ["Total Credit", f"+{total_credit}"],
+                ["Total Debit", f"-{total_debit}"]
+            ]
+
+            summary_table = Table(summary_data, colWidths=[3*inch, 2*inch])
+
+            summary_table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, -1), colors.HexColor("#F5F7FA")),
+                ('TEXTCOLOR', (0, 0), (-1, -1), colors.black),
+                ('FONTNAME', (0, 0), (-1, -1), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, -1), 11),
+                ('BOTTOMPADDING', (0, 0), (-1, -1), 8),
+                ('TOPPADDING', (0, 0), (-1, -1), 8),
+                ('BOX', (0, 0), (-1, -1), 1, colors.HexColor("#E0E0E0"))
+            ]))
+
+            elements.append(summary_table)
+            elements.append(Spacer(1, 25))
+
+            # ====================================
+            # 📄 TABLE DATA
+            # ====================================
+            data = [[
+                Paragraph("<b>Date</b>", styles['Normal']),
+                Paragraph("<b>Description</b>", styles['Normal']),
+                Paragraph("<b>Amount</b>", styles['Normal']),
+                Paragraph("<b>Balance</b>", styles['Normal'])
+            ]]
+
+            for e in entries:
+                is_credit = e.transaction_type == "CREDIT"
+                amount_val = f"+{e.quantity}" if is_credit else f"-{e.quantity}"
+                amount_color = "#2E7D32" if is_credit else "#C62828"
+
+                data.append([
+                    e.created_at.strftime("%d %b %Y"),
+                    e.description or e.action,
+                    Paragraph(f"<font color='{amount_color}'><b>{amount_val}</b></font>", styles['Normal']),
+                    f"{e.balance_after}"
+                ])
+
+            col_widths = [1.2*inch, 2.8*inch, 1.2*inch, 1.2*inch]
+            table = Table(data, colWidths=col_widths)
+
+            table_style = TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.HexColor("#F5F5F5")),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.HexColor("#333333")),
+                ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+
+                ('FONTNAME', (0, 1), (-1, -1), 'Helvetica'),
+                ('FONTSIZE', (0, 0), (-1, -1), 10),
+                ('BOTTOMPADDING', (0, 1), (-1, -1), 10),
+                ('TOPPADDING', (0, 1), (-1, -1), 10),
+
+                *[('BACKGROUND', (0, i), (-1, i), colors.HexColor("#FAFAFA")) for i in range(2, len(data), 2)],
+
+                ('LINEBELOW', (0, 0), (-1, -1), 0.5, colors.HexColor("#EEEEEE")),
+                ('LINEBELOW', (0, 0), (-1, 0), 1.5, colors.HexColor("#1A237E")),
+            ])
+
+            table.setStyle(table_style)
+            elements.append(table)
+
+            # ====================================
+            # 📝 FOOTER
+            # ====================================
+            elements.append(Spacer(1, 40))
+            footer_note = Paragraph(
+                "<i>This is a computer-generated statement and does not require a signature.</i>",
+                subtitle_style
+            )
+            elements.append(footer_note)
+
+            doc.build(elements)
+            buffer.seek(0)
+
+            safe_name = school_name.replace(" ", "_")
+
+            return send_file(
+                buffer,
+                as_attachment=True,
+                download_name=f"{safe_name}_Coin_Statement.pdf",
+                mimetype="application/pdf"
+            )
+
+        except Exception as e:
+            return {"error": str(e)}, 500
+        
+    @app.route('/api/admin/school-orders/<int:school_id>', methods=['GET'])
+    def get_school_orders(school_id):
+
+        try:
+            orders = (
+                db.session.query(Order)
+                .filter(Order.school_id == school_id)
+                .order_by(Order.created_at.desc())  # 🔥 latest first
+                .all()
+            )
+
+            result = []
+
+            for o in orders:
+
+                result.append({
+                    "id": o.id,
+
+                    # ✅ SAFE STUDENT NAME
+                    "student_name": o.student.full_name if o.student else "Walk-in / Staff",
+
+                    "amount": float(o.total_amount or 0),
+
+                    # ✅ NORMALIZED STATUS (frontend friendly)
+                    "status": (o.payment_status or "PENDING").lower(),
+
+                    # ✅ EXTRA FIELDS (SaaS grade)
+                    "payment_mode": o.payment_mode,
+                    "created_at": o.created_at.strftime("%d %b %Y, %I:%M %p") if o.created_at else None,
+
+                    # 🔥 ORDER ITEMS (IMPORTANT FOR EXPAND VIEW)
+                    "items": [
+                        {
+                            "product_name": item.product.name if item.product else "N/A",
+                            "size": item.size.size if item.size else "N/A",
+                            "quantity": item.quantity,
+                            "unit_price": float(item.unit_price or 0),
+                            "total_price": float(item.total_price or 0),
+                        }
+                        for item in o.items
+                    ],
+
+                    # 🔥 OPTIONAL (future analytics / PDF)
+                    "total_items": sum(item.quantity for item in o.items),
+                })
+
+            return jsonify({
+                "success": True,
+                "count": len(result),
+                "data": result
+            }), 200
+
+        except Exception as e:
+            print("ERROR IN SCHOOL ORDERS API:", str(e))
+
+            return jsonify({
+                "success": False,
+                "message": "Failed to fetch school orders"
+            }), 500
+
         
     @app.route('/api/admin/mark-seller-paid', methods=['POST'])
     @jwt_required()
@@ -5373,14 +6270,14 @@ def create_app():
                 func.coalesce(func.sum(Order.total_amount), 0)
             ).filter(
                 Order.school_id == s.id,
-                Order.status == 'completed'
+                Order.payment_status == 'PAID'
             ).scalar()
 
             staff_revenue = db.session.query(
                 func.coalesce(func.sum(StaffOrder.total_amount), 0)
             ).filter(
                 StaffOrder.school_id == s.id,
-                StaffOrder.status == 'completed'
+                StaffOrder.status == 'COMPLETED'
             ).scalar()
 
             total_revenue = student_revenue + staff_revenue
@@ -7239,7 +8136,12 @@ def create_app():
             if qty <= 0:
                 return jsonify({"error": "Invalid quantity"}), 400
 
-
+            product = db.session.get(Product, req.product_id)
+            
+            if not product or not product.category:
+                return jsonify({"error": "Product category missing"}), 400
+            
+            category = CategoryType(product.category)
             # ==================================
             # GET SCHOOL INVENTORY
             # ==================================
@@ -7248,7 +8150,7 @@ def create_app():
                 SchoolInventory.school_id == user.school_id,
                 SchoolInventory.product_id == req.product_id,
                 SchoolInventory.size_id == req.size_id,
-                SchoolInventory.category == CategoryType.STUDENT
+                SchoolInventory.category == category
             ).first()
 
 
@@ -7260,7 +8162,7 @@ def create_app():
                     school_id=user.school_id,
                     product_id=req.product_id,
                     size_id=req.size_id,
-                    category=CategoryType.STUDENT,
+                    category=category,
                     quantity=0,
                     total_received=0,
                     total_sold=0,
@@ -7297,10 +8199,19 @@ def create_app():
                 product_id=req.product_id,
                 size_id=req.size_id,
                 action="SCHOOL_RECEIVED",
+
+                # 🔥 KEEP ORIGINAL
                 quantity=qty,
                 balance=inventory.quantity,
+
                 seller_id=req.seller_id,
                 school_id=req.school_id,
+
+                # 🔥 ADD THESE (NO BREAKAGE)
+                description=f"Seller {req.seller_id} → School {req.school_id}",
+                transaction_type="CREDIT",  # incoming stock
+                category=category,
+
                 reference_type="SchoolStockRequest",
                 reference_id=req.id
             )
@@ -8874,14 +9785,46 @@ def create_app():
             if order.school_id != user.school_id:
                 return jsonify({"error": "Unauthorized"}), 403
 
+            # ====================================
+            # ✅ UPDATE STATUS
+            # ====================================
             order.status = new_status
+
+            # ====================================
+            # 🔥 ADD COMMISSION WHEN HANDED_OVER
+            # ====================================
+            commission = 0
+
+            if new_status == "COMPLETED" and not order.commission_added:
+
+                commission = order.add_commission_to_school()
+
+                print("COMMISSION ADDED:", commission)
+
+                # OPTIONAL LEDGER
+                if commission > 0:
+                    school = db.session.get(School, order.school_id)
+
+                    ledger = InventoryLedger(
+                        school_id=school.id,
+                        action="COMMISSION_EARNED",
+                        quantity=commission,
+                        balance_after=school.coin_balance,
+                        reference_type="ORDER",
+                        reference_id=order.id,
+                        created_at=datetime.now(timezone.utc)
+                    )
+
+                    db.session.add(ledger)
+
             db.session.commit()
 
             print("UPDATED ORDER STATUS:", order.status)
 
             return jsonify({
                 "message": "Order updated",
-                "status": order.status
+                "status": order.status,
+                "commission_added": commission
             }), 200
 
         except Exception as e:
@@ -9541,29 +10484,96 @@ def create_app():
     @session_login_required(UserRole.SCHOOL)
     def school_payment_success():
 
-        data = request.get_json()
-        order_id = data.get('order_id')
+        try:
+            data = request.get_json()
+            order_id = data.get('order_id')
 
-        order = Order.query.get(order_id)
+            if not order_id:
+                return jsonify({'error': 'order_id is required'}), 400
 
-        if not order:
-            return jsonify({'error': 'Order not found'}), 404
+            order = Order.query.get(order_id)
 
-        order.payment_status = "PAID"
-        order.status = "completed"
+            if not order:
+                return jsonify({'error': 'Order not found'}), 404
 
-        for item in order.items:
-            inventory = SchoolInventory.query.filter_by(
-                school_id=order.school_id,
-                product_id=item.product_id,
-                category=CategoryType.STUDENT
-            ).first()
+            # ====================================
+            # ✅ PREVENT DUPLICATE PAYMENT
+            # ====================================
+            if order.payment_status == "PAID":
+                return jsonify({'message': 'Payment already processed'}), 200
 
-            inventory.sell_stock(item.quantity)
+            school = db.session.get(School, order.school_id)
 
-        db.session.commit()
+            if not school:
+                return jsonify({'error': 'School not found'}), 404
 
-        return jsonify({'message': 'Payment successful'})
+            now = datetime.now(timezone.utc)
+
+            # ====================================
+            # 💰 HANDLE COIN PAYMENT (IMPORTANT)
+            # ====================================
+            if order.payment_mode and order.payment_mode.lower() == "coins":
+
+                if school.coin_balance < order.total_amount:
+                    return jsonify({'error': 'Insufficient coin balance'}), 400
+
+                # 🔻 Deduct coins
+                school.coin_balance -= order.total_amount
+
+                # 📒 Ledger Entry (DEBIT)
+                ledger = InventoryLedger(
+                    school_id=school.id,
+                    action="ORDER_PAYMENT",
+                    transaction_type="DEBIT",
+                    description=f"Coins used for Order #{order.id}",
+                    quantity=order.total_amount,
+                    balance_after=school.coin_balance,
+                    reference_type="ORDER",
+                    reference_id=order.id,
+                    created_at=now
+                )
+
+                db.session.add(ledger)
+
+            # ====================================
+            # ✅ UPDATE ORDER STATUS
+            # ====================================
+            order.payment_status = "PAID"
+            order.status = "COMPLETED"
+
+            # ====================================
+            # 📦 UPDATE INVENTORY
+            # ====================================
+            for item in order.items:
+
+                inventory = SchoolInventory.query.filter_by(
+                    school_id=order.school_id,
+                    product_id=item.product_id,
+                    size_id=item.size_id,  # ✅ IMPORTANT FIX (you missed this)
+                    category=CategoryType.STUDENT
+                ).first()
+
+                if not inventory:
+                    return jsonify({
+                        'error': f'Inventory not found for product {item.product_id}'
+                    }), 400
+
+                inventory.sell_stock(item.quantity)
+
+            db.session.commit()
+
+            return jsonify({
+                'message': 'Payment successful',
+                'payment_mode': order.payment_mode,
+                'remaining_balance': school.coin_balance if order.payment_mode.lower() == "coins" else None
+            }), 200
+
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({
+                'error': 'Payment processing failed',
+                'details': str(e)
+            }), 500
     
     @app.route('/admin/test/add-coins', methods=['POST'])
     @session_login_required(UserRole.SUPER_ADMIN)
@@ -9760,6 +10770,228 @@ def create_app():
         return jsonify({
             'message': 'Pickup confirmed successfully'
         }), 200
+        
+    @app.route("/api/school/commission-summary", methods=["GET"])
+    @jwt_required()
+    @role_required(UserRole.SCHOOL)
+    def school_commission_summary():
+
+        user = get_current_user()
+        school = db.session.get(School, user.school_id)
+
+        return {
+            "commission_percentage": school.commission_percentage,
+            "total_earnings": school.coin_balance
+        }
+    
+    @app.route("/api/school/coin-statement", methods=["GET"])
+    @jwt_required()
+    @role_required(UserRole.SCHOOL)
+    def school_coin_statement():
+
+        try:
+            user = get_current_user()
+
+            # ====================================
+            # 🧠 GET SCHOOL (FOR REAL BALANCE)
+            # ====================================
+            school = db.session.get(School, user.school_id)
+
+            # ====================================
+            # 🔍 OPTIONAL FILTERS
+            # ====================================
+            type_filter = request.args.get("type")
+            from_date = request.args.get("from_date")
+            to_date = request.args.get("to_date")
+
+            # ====================================
+            # 🧠 BASE QUERY
+            # ====================================
+            query = InventoryLedger.query.filter_by(
+                school_id=user.school_id
+            )
+
+            # ====================================
+            # 🔍 TYPE FILTER
+            # ====================================
+            if type_filter:
+                query = query.filter(
+                    InventoryLedger.transaction_type == type_filter.upper()
+                )
+
+            # ====================================
+            # 📅 DATE FILTER
+            # ====================================
+            if from_date:
+                from_datetime = datetime.strptime(from_date, "%Y-%m-%d")
+                query = query.filter(InventoryLedger.created_at >= from_datetime)
+
+            if to_date:
+                to_datetime = datetime.strptime(to_date, "%Y-%m-%d")
+                query = query.filter(InventoryLedger.created_at <= to_datetime)
+
+            # ====================================
+            # 📊 ORDERING
+            # ====================================
+            entries = query.order_by(
+                InventoryLedger.created_at.desc()
+            ).all()
+
+            # ====================================
+            # 📦 FORMAT DATA
+            # ====================================
+            result = []
+
+            for e in entries:
+                result.append({
+                    "id": e.id,
+                    "action": e.action,
+                    "type": e.transaction_type,
+                    "description": e.description,
+                    "amount": e.quantity,
+                    "balance_after": e.balance_after,
+                    "reference_id": e.reference_id,
+                    "created_at": e.created_at.isoformat()
+                })
+
+            # ====================================
+            # ✅ FINAL RESPONSE
+            # ====================================
+            return jsonify({
+                "total_records": len(result),
+                "balance": school.coin_balance if school else 0,  # 🔥 FIX
+                "data": result
+            }), 200
+
+        except Exception as e:
+            return jsonify({
+                "error": "Failed to fetch coin statement",
+                "details": str(e)
+            }), 500
+        
+    @app.route('/api/school/return-order/<int:order_id>', methods=['POST'])
+    @jwt_required()
+    @role_required(UserRole.SCHOOL)
+    def return_order(order_id):
+
+        try:
+            user = get_current_user()
+
+            order = db.session.get(Order, order_id)
+
+            if not order:
+                return jsonify({"error": "Order not found"}), 404
+
+            if order.school_id != user.school_id:
+                return jsonify({"error": "Unauthorized"}), 403
+
+            # ====================================
+            # ✅ ALLOW ONLY COMPLETED
+            # ====================================
+            if order.status != "COMPLETED":
+                return jsonify({"error": "Only completed orders can be returned"}), 400
+
+            # ====================================
+            # ❌ PREVENT DUPLICATE RETURN
+            # ====================================
+            if order.returned:
+                return jsonify({"message": "Order already returned"}), 200
+
+            school = db.session.get(School, order.school_id)
+
+            if not school:
+                return jsonify({"error": "School not found"}), 404
+
+            now = datetime.now(timezone.utc)
+
+            # ====================================
+            # 🔁 STOCK REVERSAL
+            # ====================================
+            for item in order.items:
+
+                inventory = SchoolInventory.query.filter_by(
+                    school_id=order.school_id,
+                    product_id=item.product_id,
+                    size_id=item.size_id
+                ).first()
+
+                if inventory:
+                    inventory.quantity += item.quantity
+                    inventory.total_adjusted += item.quantity
+
+            # ====================================
+            # 💰 COIN LOGIC
+            # ====================================
+            commission = 0
+
+            # ====================================
+            # ✅ REFUND COINS (IF USED)
+            # ====================================
+            if order.payment_mode and order.payment_mode.lower() == "coins":
+
+                school.coin_balance += order.total_amount
+
+                # 📒 LEDGER: REFUND (CREDIT)
+                ledger_refund = InventoryLedger(
+                    school_id=school.id,
+                    action="ORDER_REFUND",
+                    transaction_type="CREDIT",
+                    description=f"Refund for Order #{order.id}",
+                    quantity=order.total_amount,
+                    balance_after=school.coin_balance,
+                    reference_type="ORDER",
+                    reference_id=order.id,
+                    created_at=now
+                )
+
+                db.session.add(ledger_refund)
+
+            # ====================================
+            # ✅ REVERSE COMMISSION
+            # ====================================
+            if order.commission_added:
+
+                commission = (order.total_amount * school.commission_percentage) / 100
+
+                school.coin_balance -= commission
+
+                # 📒 LEDGER: COMMISSION REVERSED (DEBIT)
+                ledger_commission = InventoryLedger(
+                    school_id=school.id,
+                    action="COMMISSION_REVERSED",
+                    transaction_type="DEBIT",
+                    description=f"Commission reversed for Order #{order.id}",
+                    quantity=commission,
+                    balance_after=school.coin_balance,
+                    reference_type="ORDER",
+                    reference_id=order.id,
+                    created_at=now
+                )
+
+                db.session.add(ledger_commission)
+
+            # ====================================
+            # 🔥 MARK RETURNED
+            # ====================================
+            order.returned = True
+            order.status = "RETURNED"
+
+            db.session.commit()
+
+            return jsonify({
+                "message": "Order returned successfully",
+                "commission_reversed": commission,
+                "current_balance": school.coin_balance
+            }), 200
+
+        except Exception as e:
+            db.session.rollback()
+            return jsonify({
+                "error": "Failed to return order",
+                "details": str(e)
+            }), 500
+            
+            
     # Health check
     @app.route('/health')
     def health_check():
