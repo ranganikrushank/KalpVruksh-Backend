@@ -11048,7 +11048,13 @@ def create_app():
                 "details": str(e)
             }), 500
             
-            
+    @app.route('/terms')
+    def terms():
+        return render_template('terms.html')
+
+    @app.route('/privacy')
+    def privacy():
+        return render_template('privacy-policy.html')
     # Health check
     @app.route('/health')
     def health_check():
