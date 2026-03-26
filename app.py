@@ -7303,7 +7303,7 @@ def create_app():
 
 
             # ===============================
-            # UPDATE PRODUCT SIZES
+            # UPDATE PRODUCT SIZES (FIXED)
             # ===============================
 
             size_names = request.form.getlist("sizes[]")
@@ -7313,11 +7313,10 @@ def create_app():
 
             if size_names:
 
-                existing_sizes = ProductSize.query.filter_by(product_id=product_id).all()
-
-                for size in existing_sizes:
-                    if hasattr(size, "is_active"):
-                        size.is_active = False
+                # 🔥 Get existing sizes as dict
+                existing_sizes = {
+                    s.size: s for s in ProductSize.query.filter_by(product_id=product_id).all()
+                }
 
                 for i, size in enumerate(size_names):
 
@@ -7328,15 +7327,24 @@ def create_app():
                     rp = float(size_real_prices[i]) if i < len(size_real_prices) else 0
                     dp = float(size_discount_prices[i]) if i < len(size_discount_prices) else 0
 
-                    db.session.add(
-                        ProductSize(
-                            product_id=product_id,
-                            size=size,
-                            quantity=quantity,
-                            real_price=rp,
-                            discounted_price=dp
+                    # ✅ IF SIZE EXISTS → UPDATE
+                    if size in existing_sizes:
+                        existing = existing_sizes[size]
+                        existing.quantity = quantity
+                        existing.real_price = rp
+                        existing.discounted_price = dp
+
+                    # ✅ IF NEW SIZE → ADD
+                    else:
+                        db.session.add(
+                            ProductSize(
+                                product_id=product_id,
+                                size=size,
+                                quantity=quantity,
+                                real_price=rp,
+                                discounted_price=dp
+                            )
                         )
-                    )
 
 
             # ===============================
