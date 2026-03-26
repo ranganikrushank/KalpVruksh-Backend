@@ -864,6 +864,7 @@ class SellerSchoolProduct(db.Model):
     
 # ================= INVENTORY LEDGER =================
 from datetime import datetime, timezone
+from models import db, CategoryType
 
 
 class InventoryLedger(db.Model):
@@ -873,9 +874,13 @@ class InventoryLedger(db.Model):
     id = db.Column(db.Integer, primary_key=True)
 
     # =========================================
-    # OPTIONAL PRODUCT CONTEXT (NOT ALWAYS NEEDED)
+    # PRODUCT CONTEXT
     # =========================================
-    product_id = db.Column(db.Integer, db.ForeignKey("products.id"), nullable=True)
+    product_id = db.Column(
+        db.Integer,
+        db.ForeignKey("products.id"),
+        nullable=True
+    )
 
     size_id = db.Column(
         db.Integer,
@@ -883,37 +888,53 @@ class InventoryLedger(db.Model):
         nullable=True
     )
 
+    # 🔥 NEW: CATEGORY (CRITICAL FOR CONSISTENCY)
+    category = db.Column(
+        db.Enum(CategoryType),
+        nullable=True
+    )
+
     # =========================================
     # OWNER (VERY IMPORTANT)
     # =========================================
-    seller_id = db.Column(db.Integer, db.ForeignKey("sellers.id"), nullable=True)
-    school_id = db.Column(db.Integer, db.ForeignKey("schools.id"), nullable=True)
+    seller_id = db.Column(
+        db.Integer,
+        db.ForeignKey("sellers.id"),
+        nullable=True
+    )
+
+    school_id = db.Column(
+        db.Integer,
+        db.ForeignKey("schools.id"),
+        nullable=True
+    )
 
     # =========================================
     # TRANSACTION DETAILS
     # =========================================
-    action = db.Column(db.String(100))  
-    # e.g. ORDER_PAYMENT, COMMISSION_EARNED, ORDER_REFUND
+    action = db.Column(db.String(100))
+    # e.g. SCHOOL_RECEIVED, ORDER_SOLD, ADJUSTMENT
 
-    transaction_type = db.Column(db.String(10))  
+    transaction_type = db.Column(db.String(10))
     # CREDIT / DEBIT
 
-    description = db.Column(db.String(255))  
-    # Human readable: "Order #12 Payment", "Commission Earned"
+    description = db.Column(db.String(255))
+    # e.g. "Seller 2 → School 5"
 
     # =========================================
     # AMOUNT DETAILS
     # =========================================
-    quantity = db.Column(db.Integer)  
-    # amount of coins (+ or - handled via type)
+    quantity = db.Column(db.Integer)
+    # stock movement amount
 
     balance_after = db.Column(db.Integer)
+    # stock after transaction
 
     # =========================================
     # TRACEABILITY
     # =========================================
-    reference_type = db.Column(db.String(50))  
-    # ORDER / STOCK / MANUAL
+    reference_type = db.Column(db.String(50))
+    # e.g. SchoolStockRequest, Order, Manual
 
     reference_id = db.Column(db.Integer)
 
@@ -926,12 +947,13 @@ class InventoryLedger(db.Model):
     )
 
     # =========================================
-    # RELATIONS
+    # RELATIONSHIPS
     # =========================================
     size = db.relationship("ProductSize")
 
+    # OPTIONAL (good for debugging & logs)
     def __repr__(self):
-        return f"<Ledger {self.action} {self.transaction_type} {self.quantity}>"
+        return f"<Ledger {self.action} {self.transaction_type} {self.quantity} | Cat: {self.category}>"
     
 
 from datetime import datetime

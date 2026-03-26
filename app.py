@@ -47,29 +47,50 @@ def record_inventory(
     reference_type=None,
     reference_id=None,
 
-    # 🔥 NEW OPTIONAL FIELDS (SAFE ADDITION)
+    # OPTIONAL FIELDS
     description=None,
-    transaction_type=None
+    transaction_type=None,
+    category=None
 ):
     from datetime import datetime, timezone
+    from models import InventoryLedger, CategoryType, db
 
+    # =========================================
+    # 🔒 BASIC VALIDATION (IMPORTANT)
+    # =========================================
+    if quantity is None:
+        raise ValueError("Quantity is required")
+
+    if balance is None:
+        raise ValueError("Balance is required")
+
+    # =========================================
+    # 🔒 CATEGORY SAFETY (HANDLE STRING / ENUM)
+    # =========================================
+    if category and isinstance(category, str):
+        try:
+            category = CategoryType(category)
+        except Exception:
+            raise ValueError(f"Invalid category: {category}")
+
+    # =========================================
+    # CREATE LEDGER ENTRY
+    # =========================================
     tx = InventoryLedger(
         product_id=product_id,
         size_id=size_id,
+        category=category,  # ✅ NOW SAFE
 
         seller_id=seller_id,
         school_id=school_id,
 
         action=action,
         quantity=quantity,
-
-        # ✅ KEEP YOUR EXISTING LOGIC
         balance_after=balance,
 
         reference_type=reference_type,
         reference_id=reference_id,
 
-        # 🔥 SAFE ADDITIONS (WILL NOT BREAK ANYTHING)
         description=description,
         transaction_type=transaction_type,
 
@@ -77,6 +98,8 @@ def record_inventory(
     )
 
     db.session.add(tx)
+
+    return tx  # ✅ RETURN OBJECT (GOOD PRACTICE)
 
 
 def create_inventory_ledger(
@@ -222,7 +245,7 @@ def create_app():
     #         queries = [
 
     #             # ====================================
-    #             # ✅ seller_payments FIX
+    #             # ✅ SELLER PAYMENTS FIX
     #             # ====================================
     #             """
     #             ALTER TABLE seller_payments
@@ -277,17 +300,29 @@ def create_app():
     #             ADD COLUMN IF NOT EXISTS description VARCHAR(255);
     #             """,
 
+    #             # 🔥 NEW: CATEGORY COLUMN
+    #             """
+    #             DO $$ 
+    #             BEGIN
+    #                 IF NOT EXISTS (
+    #                     SELECT 1 FROM information_schema.columns 
+    #                     WHERE table_name='inventory_ledger' AND column_name='category'
+    #                 ) THEN
+    #                     ALTER TABLE inventory_ledger
+    #                     ADD COLUMN category VARCHAR(20);
+    #                 END IF;
+    #             END$$;
+    #             """,
+
     #             # ====================================
-    #             # 🚨 CRITICAL DATA CLEANUP (VERY IMPORTANT)
+    #             # 🚨 DATA CLEANUP
     #             # ====================================
 
-    #             # ❌ Remove wrong old entries
     #             """
     #             DELETE FROM inventory_ledger
     #             WHERE action IN ('STUDENT_PURCHASE', 'STAFF_PURCHASE');
     #             """,
 
-    #             # ❌ Remove empty / broken rows
     #             """
     #             DELETE FROM inventory_ledger
     #             WHERE description IS NULL OR description = '';
@@ -297,28 +332,37 @@ def create_app():
     #             # ✅ FIX EXISTING DATA
     #             # ====================================
 
-    #             # Set CREDIT where missing
+    #             # Default transaction type
     #             """
     #             UPDATE inventory_ledger
     #             SET transaction_type = 'CREDIT'
     #             WHERE transaction_type IS NULL;
     #             """,
 
-    #             # Fix negative/positive mismatch
+    #             # Fix debit entries
     #             """
     #             UPDATE inventory_ledger
     #             SET transaction_type = 'DEBIT'
     #             WHERE quantity < 0;
     #             """,
 
-    #             # Make quantities always positive (UI handles +/-)
+    #             # Normalize quantity
     #             """
     #             UPDATE inventory_ledger
     #             SET quantity = ABS(quantity);
     #             """,
 
     #             # ====================================
-    #             # 🚀 INDEXES
+    #             # 🔥 OPTIONAL: SET CATEGORY DEFAULT (SAFE)
+    #             # ====================================
+    #             """
+    #             UPDATE inventory_ledger
+    #             SET category = 'student'
+    #             WHERE category IS NULL;
+    #             """,
+
+    #             # ====================================
+    #             # 🚀 INDEXES (PERFORMANCE)
     #             # ====================================
 
     #             """
@@ -334,6 +378,11 @@ def create_app():
     #             """
     #             CREATE INDEX IF NOT EXISTS idx_ledger_reference
     #             ON inventory_ledger (reference_type, reference_id);
+    #             """,
+
+    #             """
+    #             CREATE INDEX IF NOT EXISTS idx_ledger_category
+    #             ON inventory_ledger (category);
     #             """,
 
     #             # ====================================
@@ -353,7 +402,7 @@ def create_app():
 
     #         return {
     #             "success": True,
-    #             "message": "DB cleaned + upgraded successfully (ledger fixed)"
+    #             "message": "DB upgraded successfully (ledger + category fully fixed)"
     #         }
 
     #     except Exception as e:
