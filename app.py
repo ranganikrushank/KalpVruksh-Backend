@@ -8,15 +8,15 @@ from functools import wraps
 
 import cloudinary
 import cloudinary.uploader
-
 import razorpay
+from dotenv import load_dotenv
 from flask import (Flask, jsonify, redirect, render_template, request, session,
                    url_for)
 from flask_cors import CORS  # Add if needed for frontend
-from flask_jwt_extended import (JWTManager, create_access_token, get_current_user,
-                                get_jwt_identity, jwt_required,
-                                unset_jwt_cookies)
-from dotenv import load_dotenv
+from flask_jwt_extended import (JWTManager, create_access_token,
+                                get_current_user, get_jwt_identity,
+                                jwt_required, unset_jwt_cookies)
+
 load_dotenv()
 
 from auth import login, register_user, role_required
@@ -24,9 +24,10 @@ from config import Config
 from models import (AdminDispatchInstruction, AuditLog, CategoryType,
                     InventoryLedger, Order, OrderItem, Product, ProductImage,
                     ProductSize, School, SchoolInventory, SchoolStockRequest,
-                    Seller, SellerInventory, SellerSchoolProduct, Shipment,
-                    ShipmentItem, ShipmentStatus, StaffOrder, StaffOrderItem,SellerPayment,
-                    User, UserRole, db)
+                    Seller, SellerInventory, SellerPayment,
+                    SellerSchoolProduct, Shipment, ShipmentItem,
+                    ShipmentStatus, StaffOrder, StaffOrderItem, User, UserRole,
+                    db)
 
 
 def success_response(data=None, message=None, status=200):
@@ -53,7 +54,8 @@ def record_inventory(
     category=None
 ):
     from datetime import datetime, timezone
-    from models import InventoryLedger, CategoryType, db
+
+    from models import CategoryType, InventoryLedger, db
 
     # =========================================
     # 🔒 BASIC VALIDATION (IMPORTANT)
@@ -2134,14 +2136,17 @@ def create_app():
         # 🔥 DEFAULT
         return log.description if log.description else "Stock Update"
             
-    from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image, HRFlowable
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from collections import defaultdict
+    from io import BytesIO
+
+    from flask import request, send_file
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import inch
-    from flask import request, send_file
-    from io import BytesIO
-    from collections import defaultdict
+    from reportlab.platypus import (HRFlowable, Image, Paragraph,
+                                    SimpleDocTemplate, Spacer, Table,
+                                    TableStyle)
 
     @app.route("/api/admin/inventory-ledger/download", methods=["GET"])
     @jwt_required()
@@ -2386,7 +2391,7 @@ def create_app():
 
         import calendar
 
-        from sqlalchemy import func, extract
+        from sqlalchemy import extract, func
 
         monthly_data = db.session.query(
             extract('month', Order.created_at),
@@ -3291,13 +3296,15 @@ def create_app():
                 "details": str(e)
             }), 500
 
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Image, Spacer
+    from io import BytesIO
+
+    from flask import send_file
     from reportlab.lib import colors
     from reportlab.lib.pagesizes import A4
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from io import BytesIO
+    from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
     from reportlab.lib.units import inch
-    from flask import send_file
+    from reportlab.platypus import (Image, Paragraph, SimpleDocTemplate,
+                                    Spacer, Table, TableStyle)
 
     @app.route("/api/school/coin-statement-pdf", methods=["GET"])
     @jwt_required()
@@ -3346,7 +3353,7 @@ def create_app():
             )
 
             # 2. Header / Logo Section
-            logo_path = "static/logo.png"
+            logo_path = os.path.join(os.getcwd(), "static", "logo.png")
             try:
                 logo = Image(logo_path, width=2*inch, height=0.8*inch)
                 logo.hAlign = 'CENTER'
@@ -3432,8 +3439,9 @@ def create_app():
         except Exception as e:
             return {"error": str(e)}, 500
     
-    from datetime import datetime
     from calendar import monthrange
+    from datetime import datetime
+
     from sqlalchemy import func
 
     @app.route('/api/admin/revenue-dashboard', methods=['GET'])
@@ -3729,7 +3737,7 @@ def create_app():
             # ====================================
             # 🏢 HEADER
             # ====================================
-            logo_path = "static/logo.png"
+            logo_path = os.path.join(os.getcwd(), "static", "logo.png")
             try:
                 logo = Image(logo_path, width=2*inch, height=0.8*inch)
                 logo.hAlign = 'CENTER'
@@ -3737,9 +3745,17 @@ def create_app():
             except:
                 elements.append(Spacer(1, 0.5*inch))
 
+            # ✅ SAFE DATE (NO CRASH)
+            generated_date = (
+                entries[0].created_at.strftime('%d %b %Y')
+                if entries else "N/A"
+            )
+
+            # ✅ ADD ELEMENTS PROPERLY
             elements.append(Paragraph("<b>COIN TRANSACTION STATEMENT</b>", title_style))
+
             elements.append(Paragraph(
-                f"Generated on: {entries[0].created_at.strftime('%d %b %Y') if entries else 'N/A'}",
+                f"Generated on: {generated_date}",
                 subtitle_style
             ))
 
@@ -3832,12 +3848,17 @@ def create_app():
 
             safe_name = school_name.replace(" ", "_")
 
-            return send_file(
+            response = send_file(
                 buffer,
                 as_attachment=True,
                 download_name=f"{safe_name}_Coin_Statement.pdf",
                 mimetype="application/pdf"
             )
+
+            # ✅ IMPORTANT FOR WEB DOWNLOAD
+            response.headers["Access-Control-Expose-Headers"] = "Content-Disposition"
+
+            return response
 
         except Exception as e:
             return {"error": str(e)}, 500
@@ -8609,79 +8630,20 @@ def create_app():
                 size_id = default_size.id
 
 
-            seller_inv = SellerInventory.query.filter_by(
-                seller_id=req.seller_id,
-                product_id=req.product_id,
-                size_id=size_id
-            ).first()
-
-
-            if not seller_inv:
-                seller_inv = SellerInventory(
-                    seller_id=req.seller_id,
-                    product_id=req.product_id,
-                    size_id=size_id,
-                    total_allocated=0,
-                    sent_stock=0,
-                    remaining_stock=0
-                )
-
-                db.session.add(seller_inv)
-                db.session.flush()
+            # ===============================
+            # 🚫 REMOVED STOCK LOGIC
+            # ===============================
+            # ❌ seller inventory updates removed
+            # ❌ school inventory updates removed
+            # ❌ ledger entry removed
 
 
             # ===============================
-            # INCREASE SELLER STOCK
+            # ✅ UPDATE REQUEST ONLY
             # ===============================
-
-            seller_inv.remaining_stock += req.quantity
-
-            # 🔥 IMPORTANT FIX (missing earlier)
-            seller_inv.total_allocated += req.quantity
-
-
-            if seller_inv.sent_stock >= req.quantity:
-                seller_inv.sent_stock -= req.quantity
-
-
-            # ===============================
-            # REDUCE SCHOOL STOCK
-            # ===============================
-
-            school_inv = SchoolInventory.query.filter_by(
-                school_id=req.school_id,
-                product_id=req.product_id,
-                size_id=size_id
-            ).first()
-
-            if school_inv:
-                school_inv.quantity = max(0, school_inv.quantity - req.quantity)
-
-
-            # ===============================
-            # UPDATE REQUEST
-            # ===============================
-
             req.status = "RECEIVED"
             req.received_at = datetime.now(timezone.utc)
 
-
-            # ===============================
-            # LEDGER ENTRY
-            # ===============================
-
-            ledger = InventoryLedger(
-                product_id=req.product_id,
-                size_id=size_id,
-                seller_id=req.seller_id,
-                action="SELLER_RECEIVE",
-                quantity=req.quantity,
-                balance_after=seller_inv.remaining_stock,
-                reference_type="SCHOOL_TRANSFER",
-                reference_id=req.id
-            )
-
-            db.session.add(ledger)
 
             db.session.commit()
 
