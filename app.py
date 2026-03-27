@@ -3665,6 +3665,9 @@ def create_app():
                 "details": str(e)
             }, 500
     
+    
+    from reportlab.lib.utils import ImageReader
+    
     @app.route("/api/admin/school-coin-statement-pdf/<int:school_id>", methods=["GET"])
     @jwt_required()
     @role_required(UserRole.SUPER_ADMIN)
@@ -3738,12 +3741,21 @@ def create_app():
             # 🏢 HEADER
             # ====================================
             logo_path = os.path.join(os.getcwd(), "static", "logo.png")
-            try:
-                logo = Image(logo_path, width=2*inch, height=0.8*inch)
-                logo.hAlign = 'CENTER'
-                elements.append(logo)
-            except:
-                elements.append(Spacer(1, 0.5*inch))
+
+            if os.path.exists(logo_path):
+                try:
+                    img_reader = ImageReader(logo_path)   # ✅ FORCE LOAD IMAGE HERE
+
+                    logo = Image(img_reader, width=2*inch, height=0.8*inch)
+                    logo.hAlign = 'CENTER'
+                    elements.append(logo)
+
+                except Exception as e:
+                    print("Logo load failed:", e)
+                    elements.append(Spacer(1, 20))
+            else:
+                print("Logo file NOT found at:", logo_path)
+                elements.append(Spacer(1, 20))
 
             # ✅ SAFE DATE (NO CRASH)
             generated_date = (
