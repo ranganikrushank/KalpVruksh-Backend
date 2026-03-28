@@ -2010,23 +2010,27 @@ def create_app():
             "status": o.status
         } for o in orders])
     
+    # @app.route('/api/school/complete-order/<int:order_id>', methods=['POST'])
+    # def mark_order_handed_over(order_id):
+    #     return {"message": "hit"}, 200
     @app.route('/api/school/complete-order/<int:order_id>', methods=['POST'])
     @jwt_required()
     @role_required(UserRole.SCHOOL)
     def mark_order_handed_over(order_id):
 
         try:
-            user = get_current_user()
+            user_id = get_jwt_identity()
+            user = db.session.get(User, int(user_id))
 
-            order = db.session.get(Order, order_id)
+            order = db.session.get(Order, int(order_id)) or db.session.get(StaffOrder, int(order_id))
 
             if not order:
                 return jsonify({"error": "Order not found"}), 404
 
-            if order.school_id != user.school_id:
+            if str(order.school_id) != str(user.school_id):
                 return jsonify({"error": "Unauthorized"}), 403
 
-            if order.status == "COMPLETED":
+            if order.status.upper() == "COMPLETED":
                 return jsonify({"message": "Order already Completed"}), 200
 
             now = datetime.now(timezone.utc)
@@ -2095,13 +2099,19 @@ def create_app():
                     created_at=now
                 )
                 db.session.add(ledger)
+            db.session.flush()
 
             db.session.commit()
 
             return jsonify({
                 "message": "Order marked as handed over",
+                "order": {
+                    "order_id": order.id,
+                    "status": order.status,
+                    "completed_at": str(order.completed_at)
+                },
                 "commission_added": commission,
-                "new_balance": school.coin_balance   # ✅ SAFE NOW
+                "new_balance": school.coin_balance
             }), 200
 
         except Exception as e:
@@ -3169,7 +3179,7 @@ def create_app():
                 # ✅ UPDATE ORDER
                 # ===============================
                 order.total_amount = total_amount
-                order.status = "PAID"
+                order.status = "COMPLETED"
 
                 if category_enum == CategoryType.STUDENT:
                     order.payment_status = "PAID"
@@ -3255,7 +3265,7 @@ def create_app():
                 db.session.add(ledger)
                 
                 order.total_amount = total_amount
-                order.status = "PENDING"
+                order.status = "READY_FOR_HANDOVER"
 
                 db.session.commit()
 
@@ -9709,7 +9719,7 @@ def create_app():
                     })
 
                 result.append({
-                    "order_id": order.id,
+                    "id": order.id,
                     "status": order.status,
                     "payment_status": order.payment_status,
                     "payment_mode": getattr(order, "payment_mode", "online"),
