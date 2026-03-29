@@ -7397,21 +7397,36 @@ def create_app():
             seller_ids = request.form.getlist("seller_ids[]")
             school_ids = request.form.getlist("school_ids[]")
 
-            SellerSchoolProduct.query.filter_by(
-                product_id=product_id
-            ).delete()
+            if seller_ids and school_ids:
+                SellerSchoolProduct.query.filter_by(product_id=product_id).delete()
 
-            for seller_id in seller_ids:
-
-                for school_id in school_ids:
-
-                    db.session.add(
-                        SellerSchoolProduct(
-                            product_id=product_id,
-                            seller_id=int(seller_id),
-                            school_id=int(school_id)
+                for seller_id in seller_ids:
+                    for school_id in school_ids:
+                        db.session.add(
+                            SellerSchoolProduct(
+                                product_id=product_id,
+                                seller_id=int(seller_id),
+                                school_id=int(school_id)
+                            )
                         )
-                    )
+
+            seller_ids = request.form.getlist("seller_ids[]")
+            school_ids = request.form.getlist("school_ids[]")
+
+            if seller_ids and school_ids:
+                # 🔥 clear old mapping
+                SellerSchoolProduct.query.filter_by(product_id=product_id).delete()
+
+                # 🔥 add new mapping
+                for seller_id in seller_ids:
+                    for school_id in school_ids:
+                        db.session.add(
+                            SellerSchoolProduct(
+                                product_id=product_id,
+                                seller_id=int(seller_id),
+                                school_id=int(school_id)
+                            )
+                        )
 
             # =====================================================
             # ADD THIS BLOCK (MISSING SCHOOL INVENTORY CREATION)
