@@ -3632,46 +3632,63 @@ def create_app():
     def admin_school_coin_statement(school_id):
 
         try:
-            # ====================================
-            # 🧠 GET SCHOOL (REAL BALANCE)
-            # ====================================
             school = db.session.get(School, school_id)
 
-            # ====================================
-            # 📊 FETCH LEDGER
-            # ====================================
-            entries = (
-                InventoryLedger.query
-                .filter_by(school_id=school_id)
-                .order_by(InventoryLedger.created_at.desc())
-                .all()
+            if not school:
+                return {"error": "School not found"}, 404
+
+            tx_type = request.args.get("type")
+
+            # 🔥 ONLY COIN-RELATED ACTIONS
+            COIN_ACTIONS = [
+                "COMMISSION_EARNED",
+                "ORDER_PAYMENT",
+                "ORDER_RETURN",
+                "COMMISSION_REVERSED"
+            ]
+
+            query = InventoryLedger.query.filter(
+                InventoryLedger.school_id == school_id,
+                InventoryLedger.action.in_(COIN_ACTIONS)
             )
+
+            entries = query.order_by(InventoryLedger.created_at.desc()).all()
 
             result = []
 
             for e in entries:
+
+                # ✅ MAP CREDIT / DEBIT
+                if e.action in ["COMMISSION_EARNED", "ORDER_RETURN"]:
+                    tx = "CREDIT"
+                elif e.action in ["ORDER_PAYMENT", "COMMISSION_REVERSED"]:
+                    tx = "DEBIT"
+                else:
+                    tx = "NEUTRAL"
+
+                # ✅ APPLY FILTER
+                if tx_type and tx != tx_type:
+                    continue
+
                 result.append({
                     "id": e.id,
                     "action": e.action,
-                    "type": e.transaction_type,
+                    "type": tx,
                     "description": e.description,
-                    "amount": e.quantity,
+                    "amount": abs(e.quantity),  # ✅ USE QUANTITY BUT SAFE
                     "balance_after": e.balance_after,
                     "created_at": e.created_at.isoformat()
                 })
 
-            # ====================================
-            # ✅ FINAL RESPONSE
-            # ====================================
-            return jsonify({
+            return {
                 "total_records": len(result),
-                "balance": school.coin_balance if school else 0,  # 🔥 CRITICAL FIX
+                "balance": school.coin_balance,
                 "data": result
-            }), 200
+            }, 200
 
         except Exception as e:
             return {
-                "error": "Failed to fetch admin coin statement",
+                "error": "Failed to fetch coin statement",
                 "details": str(e)
             }, 500
     
@@ -3885,66 +3902,100 @@ def create_app():
         except Exception as e:
             return {"error": str(e)}, 500
         
+    # @app.route('/api/admin/school-orders/<int:school_id>', methods=['GET'])
+    # def get_school_orders(school_id):
+
+    #     try:
+    #         from sqlalchemy import or_
+    #         from models import User
+
+    #         orders = (
+    #             db.session.query(Order)
+    #             .outerjoin(User, Order.student_id == User.id)
+    #             .filter(
+    #                 or_(
+    #                     Order.school_id == school_id,   # ✅ main correct mapping
+    #                     User.school_id == school_id     # ✅ fallback mapping
+    #                 )
+    #             )
+    #             .order_by(Order.created_at.desc())
+    #             .all()
+    #         )
+
+    #         result = []
+
+    #         for o in orders:
+
+    #             result.append({
+    #                 "id": o.id,
+
+    #                 # ✅ SAFE STUDENT NAME
+    #                 "student_name": o.student.full_name if o.student else "Walk-in / Staff",
+
+    #                 "amount": float(o.total_amount or 0),
+
+    #                 # ✅ NORMALIZED STATUS
+    #                 "status": (o.payment_status or "PENDING").lower(),
+
+    #                 # ✅ EXTRA FIELDS
+    #                 "payment_mode": o.payment_mode,
+    #                 "created_at": o.created_at.strftime("%d %b %Y, %I:%M %p") if o.created_at else None,
+
+    #                 # 🔥 ITEMS
+    #                 "items": [
+    #                     {
+    #                         "product_name": item.product.name if item.product else "N/A",
+    #                         "size": item.size.size if item.size else "N/A",
+    #                         "quantity": item.quantity,
+    #                         "unit_price": float(item.unit_price or 0),
+    #                         "total_price": float(item.total_price or 0),
+    #                     }
+    #                     for item in o.items
+    #                 ],
+
+    #                 "total_items": sum(item.quantity for item in o.items),
+    #             })
+
+    #         return jsonify({
+    #             "success": True,
+    #             "count": len(result),
+    #             "data": result
+    #         }), 200
+
+    #     except Exception as e:
+    #         print("ERROR IN SCHOOL ORDERS API:", str(e))
+
+    #         return jsonify({
+    #             "success": False,
+    #             "message": "Failed to fetch school orders"
+    #         }), 500
+
     @app.route('/api/admin/school-orders/<int:school_id>', methods=['GET'])
     def get_school_orders(school_id):
 
         try:
-            orders = (
-                db.session.query(Order)
-                .filter(Order.school_id == school_id)
-                .order_by(Order.created_at.desc())  # 🔥 latest first
-                .all()
-            )
+            print("👉 REQUESTED SCHOOL ID:", school_id)
 
-            result = []
+            all_orders = Order.query.all()
 
-            for o in orders:
-
-                result.append({
-                    "id": o.id,
-
-                    # ✅ SAFE STUDENT NAME
-                    "student_name": o.student.full_name if o.student else "Walk-in / Staff",
-
-                    "amount": float(o.total_amount or 0),
-
-                    # ✅ NORMALIZED STATUS (frontend friendly)
-                    "status": (o.payment_status or "PENDING").lower(),
-
-                    # ✅ EXTRA FIELDS (SaaS grade)
-                    "payment_mode": o.payment_mode,
-                    "created_at": o.created_at.strftime("%d %b %Y, %I:%M %p") if o.created_at else None,
-
-                    # 🔥 ORDER ITEMS (IMPORTANT FOR EXPAND VIEW)
-                    "items": [
-                        {
-                            "product_name": item.product.name if item.product else "N/A",
-                            "size": item.size.size if item.size else "N/A",
-                            "quantity": item.quantity,
-                            "unit_price": float(item.unit_price or 0),
-                            "total_price": float(item.total_price or 0),
-                        }
-                        for item in o.items
-                    ],
-
-                    # 🔥 OPTIONAL (future analytics / PDF)
-                    "total_items": sum(item.quantity for item in o.items),
+            debug = []
+            for o in all_orders:
+                debug.append({
+                    "order_id": o.id,
+                    "order_school_id": o.school_id,
+                    "student_id": o.student_id
                 })
+
+            print("👉 ALL ORDERS:", debug)
 
             return jsonify({
                 "success": True,
-                "count": len(result),
-                "data": result
+                "debug": debug
             }), 200
 
         except Exception as e:
-            print("ERROR IN SCHOOL ORDERS API:", str(e))
-
-            return jsonify({
-                "success": False,
-                "message": "Failed to fetch school orders"
-            }), 500
-
+            print("ERROR:", str(e))
+            return jsonify({"success": False}), 500
         
     @app.route('/api/admin/mark-seller-paid', methods=['POST'])
     @jwt_required()
@@ -4762,13 +4813,13 @@ def create_app():
             query = InventoryLedger.query
 
             # ================= APPLY FILTERS =================
-
             if seller_id:
                 query = query.filter(InventoryLedger.seller_id == seller_id)
 
             if school_id:
                 query = query.filter(InventoryLedger.school_id == school_id)
 
+            # ================= SORT =================
             logs = query.order_by(InventoryLedger.created_at.desc()).all()
 
             result = []
@@ -4781,58 +4832,97 @@ def create_app():
                 size = ProductSize.query.get(log.size_id) if log.size_id else None
 
                 product_name = product.name if product else "Product"
-                size_name = f" ({size.size})" if size else ""
+                size_name = size.size if size else None
 
-                seller_name = seller.name if seller else "Seller"
-                school_name = school.name if school else "School"
+                seller_name = seller.name if seller else None
+                school_name = school.name if school else None
 
-                qty = abs(log.quantity)
-
-                # ================= TYPE =================
-                tx_category = "IN" if log.quantity > 0 else "OUT"
-
-                # FILTER TYPE
+                # ================= FILTER TYPE =================
                 if tx_type == "in" and log.quantity <= 0:
                     continue
                 if tx_type == "out" and log.quantity > 0:
                     continue
 
-                # SEARCH FILTER
+                # ================= SEARCH =================
                 if search and search.lower() not in product_name.lower():
                     continue
 
-                # ================= DESCRIPTION =================
-                if log.action == "ADMIN_STOCK_ADDED":
-                    desc = f"Admin added {qty} units of {product_name}{size_name} to {seller_name}"
+                action = (log.action or "").upper()
 
-                elif log.action == "SELLER_TO_SCHOOL_SHIPMENT":
-                    desc = f"{seller_name} sent {qty} units of {product_name}{size_name} to {school_name}"
+                # ======================================================
+                # 🔥 FINAL ACCURATE TRANSACTION CLASSIFICATION
+                # ======================================================
 
-                elif log.action == "SCHOOL_STOCK_RECEIVED":
-                    desc = f"{school_name} received {qty} units from {seller_name}"
+                # ================= INCOMING =================
+                if log.quantity > 0:
 
-                elif log.action == "SCHOOL_SENT_TO_SELLER":
-                    desc = f"{school_name} returned {qty} units to {seller_name}"
+                    if "ADD" in action:
+                        transaction_type = "SELLER_ADD"
+                        desc = "Stock Added by Seller"
 
-                elif log.action == "STUDENT_PURCHASE":
-                    desc = f"Student purchased {qty} units of {product_name}{size_name}"
+                    elif "RETURN" in action:
+                        transaction_type = "RETURNED_FROM_SCHOOL"
+                        desc = f"{school_name or 'School'} → {seller_name or 'Seller'}"
 
-                elif log.action == "STAFF_PURCHASE":
-                    desc = f"Staff purchased {qty} units of {product_name}{size_name}"
+                    elif log.seller_id and log.school_id:
+                        transaction_type = "SENT_TO_SCHOOL"
+                        desc = f"{seller_name or 'Seller'} → {school_name or 'School'}"
 
+                    else:
+                        transaction_type = "SELLER_UPDATE"
+                        desc = "Stock Updated"
+
+                # ================= OUTGOING =================
                 else:
-                    desc = f"{product_name} stock updated by {qty} units"
 
-                created_at = log.created_at.strftime("%Y-%m-%d %H:%M") if log.created_at else None
+                    # 🔥 PRIORITY: ACTION BASED (MOST ACCURATE)
+                    if "STUDENT" in action:
+                        transaction_type = "STUDENT_PURCHASE"
+                        desc = "Student Purchase"
 
+                    elif "SCHOOL" in action or "STAFF" in action:
+                        transaction_type = "SCHOOL_PURCHASE"
+                        desc = "School Purchase"
+
+                    elif "RETURN" in action:
+                        transaction_type = "RETURNED_FROM_SCHOOL"
+                        desc = f"{school_name or 'School'} → {seller_name or 'Seller'}"
+
+                    elif "SEND" in action or "SHIP" in action:
+                        transaction_type = "SENT_TO_SCHOOL"
+                        desc = f"{seller_name or 'Seller'} → {school_name or 'School'}"
+
+                    # 🔥 FALLBACK (WHEN ACTION IS MISSING)
+                    elif log.school_id and not log.seller_id:
+                        transaction_type = "STUDENT_PURCHASE"
+                        desc = "Student Purchase"
+
+                    elif log.seller_id and log.school_id:
+                        transaction_type = "SENT_TO_SCHOOL"
+                        desc = f"{seller_name or 'Seller'} → {school_name or 'School'}"
+
+                    else:
+                        transaction_type = "SELLER_UPDATE"
+                        desc = "Stock Updated"
+
+                # ================= DATE =================
+                created_at = (
+                    log.created_at.strftime("%Y-%m-%d %H:%M")
+                    if log.created_at else None
+                )
+
+                # ================= RESPONSE =================
                 result.append({
                     "id": log.id,
                     "product_name": product_name,
-                    "size": size.size if size else None,
-                    "description": desc,
-                    "type": tx_category,
+                    "size": size_name,
+                    "category": log.category.value if log.category else None,
+
                     "quantity": log.quantity,
                     "balance_after": log.balance_after,
+
+                    "transaction_type": transaction_type,
+                    "description": desc,
                     "created_at": created_at
                 })
 
@@ -6525,6 +6615,34 @@ def create_app():
             product = Product.query.get(tx.product_id)
             size = ProductSize.query.get(tx.size_id) if tx.size_id else None
 
+            school_name = None
+
+            try:
+                # ✅ PRIORITY 1: Direct from ledger (BEST & FASTEST)
+                if tx.school_id:
+                    school = School.query.get(tx.school_id)
+                    if school:
+                        school_name = school.name
+
+                # ✅ PRIORITY 2: From Order
+                elif tx.reference_type == "ORDER":
+                    order = Order.query.get(tx.reference_id)
+                    if order:
+                        school = School.query.get(order.school_id)
+                        if school:
+                            school_name = school.name
+
+                # ✅ PRIORITY 3: From Shipment
+                elif tx.reference_type == "SHIPMENT":
+                    shipment = Shipment.query.get(tx.reference_id)
+                    if shipment:
+                        school = School.query.get(shipment.to_school_id)
+                        if school:
+                            school_name = school.name
+
+            except Exception as e:
+                print("School fetch error:", str(e))
+
             result.append({
                 "date": tx.created_at.strftime("%Y-%m-%d %H:%M"),
                 "product": product.name if product else "Unknown",
@@ -6532,6 +6650,7 @@ def create_app():
                 "action": tx.action,
                 "quantity": tx.quantity,
                 "balance": tx.balance_after,
+                "school_name": school_name,
                 "reference": f"{tx.reference_type} #{tx.reference_id}"
             })
 
@@ -10844,7 +10963,6 @@ def create_app():
     @jwt_required()
     @role_required(UserRole.SCHOOL)
     def school_coin_statement():
-
         try:
             user = get_current_user()
 
@@ -10861,10 +10979,22 @@ def create_app():
             to_date = request.args.get("to_date")
 
             # ====================================
-            # 🧠 BASE QUERY
+            # ✅ ALLOWED ACTIONS (VERY IMPORTANT)
             # ====================================
-            query = InventoryLedger.query.filter_by(
-                school_id=user.school_id
+            VALID_ACTIONS = [
+                "COMMISSION_EARNED",
+                "ORDER_PAYMENT",
+                "ORDER_RETURN",
+                "COMMISSION_REVERSED"
+            ]
+
+            # ====================================
+            # 🧠 BASE QUERY (STRICT FILTERING)
+            # ====================================
+            query = InventoryLedger.query.filter(
+                InventoryLedger.school_id == user.school_id,
+                InventoryLedger.quantity != 0,  # ❌ remove zero entries
+                InventoryLedger.action.in_(VALID_ACTIONS)  # ❌ remove junk actions
             )
 
             # ====================================
@@ -10894,18 +11024,23 @@ def create_app():
             ).all()
 
             # ====================================
-            # 📦 FORMAT DATA
+            # 📦 FORMAT DATA (CLEAN OUTPUT)
             # ====================================
             result = []
 
             for e in entries:
+
+                # 🚨 EXTRA SAFETY (skip bad rows)
+                if e.quantity is None:
+                    continue
+
                 result.append({
                     "id": e.id,
                     "action": e.action,
                     "type": e.transaction_type,
                     "description": e.description,
-                    "amount": e.quantity,
-                    "balance_after": e.balance_after,
+                    "amount": int(e.quantity),  # ✅ FIX DECIMAL ISSUE HERE
+                    "balance_after": int(e.balance_after or 0),
                     "reference_id": e.reference_id,
                     "created_at": e.created_at.isoformat()
                 })
@@ -10915,7 +11050,7 @@ def create_app():
             # ====================================
             return jsonify({
                 "total_records": len(result),
-                "balance": school.coin_balance if school else 0,  # 🔥 FIX
+                "balance": int(school.coin_balance) if school else 0,  # ✅ FIX DECIMAL
                 "data": result
             }), 200
 
