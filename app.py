@@ -3902,100 +3902,148 @@ def create_app():
         except Exception as e:
             return {"error": str(e)}, 500
         
-    # @app.route('/api/admin/school-orders/<int:school_id>', methods=['GET'])
-    # def get_school_orders(school_id):
-
-    #     try:
-    #         from sqlalchemy import or_
-    #         from models import User
-
-    #         orders = (
-    #             db.session.query(Order)
-    #             .outerjoin(User, Order.student_id == User.id)
-    #             .filter(
-    #                 or_(
-    #                     Order.school_id == school_id,   # ✅ main correct mapping
-    #                     User.school_id == school_id     # ✅ fallback mapping
-    #                 )
-    #             )
-    #             .order_by(Order.created_at.desc())
-    #             .all()
-    #         )
-
-    #         result = []
-
-    #         for o in orders:
-
-    #             result.append({
-    #                 "id": o.id,
-
-    #                 # ✅ SAFE STUDENT NAME
-    #                 "student_name": o.student.full_name if o.student else "Walk-in / Staff",
-
-    #                 "amount": float(o.total_amount or 0),
-
-    #                 # ✅ NORMALIZED STATUS
-    #                 "status": (o.payment_status or "PENDING").lower(),
-
-    #                 # ✅ EXTRA FIELDS
-    #                 "payment_mode": o.payment_mode,
-    #                 "created_at": o.created_at.strftime("%d %b %Y, %I:%M %p") if o.created_at else None,
-
-    #                 # 🔥 ITEMS
-    #                 "items": [
-    #                     {
-    #                         "product_name": item.product.name if item.product else "N/A",
-    #                         "size": item.size.size if item.size else "N/A",
-    #                         "quantity": item.quantity,
-    #                         "unit_price": float(item.unit_price or 0),
-    #                         "total_price": float(item.total_price or 0),
-    #                     }
-    #                     for item in o.items
-    #                 ],
-
-    #                 "total_items": sum(item.quantity for item in o.items),
-    #             })
-
-    #         return jsonify({
-    #             "success": True,
-    #             "count": len(result),
-    #             "data": result
-    #         }), 200
-
-    #     except Exception as e:
-    #         print("ERROR IN SCHOOL ORDERS API:", str(e))
-
-    #         return jsonify({
-    #             "success": False,
-    #             "message": "Failed to fetch school orders"
-    #         }), 500
-
     @app.route('/api/admin/school-orders/<int:school_id>', methods=['GET'])
     def get_school_orders(school_id):
 
         try:
-            print("👉 REQUESTED SCHOOL ID:", school_id)
+            from models import User, StaffOrder, StaffOrderItem, Product, ProductSize
 
-            all_orders = Order.query.all()
+            result = []
 
-            debug = []
-            for o in all_orders:
-                debug.append({
-                    "order_id": o.id,
-                    "order_school_id": o.school_id,
-                    "student_id": o.student_id
+            # ===============================
+            # ✅ STUDENT ORDERS
+            # ===============================
+            orders = (
+                db.session.query(Order)
+                .filter(Order.school_id == school_id)
+                .order_by(Order.created_at.desc())
+                .all()
+            )
+
+            for o in orders:
+                result.append({
+                    "id": o.id,
+                    "student_name": o.student.full_name if o.student else "Walk-in / Staff",
+                    "amount": float(o.total_amount or 0),
+                    "status": (o.payment_status or "PENDING").lower(),
+                    "payment_mode": o.payment_mode,
+                    "created_at": o.created_at.isoformat() if o.created_at else None,
+
+                    "items": [
+                        {
+                            "product_name": item.product.name if item.product else "N/A",
+                            "size": item.size.size if item.size else "N/A",
+                            "quantity": item.quantity,
+                            "unit_price": float(item.unit_price or 0),
+                            "total_price": float(item.total_price or 0),
+                        }
+                        for item in o.items
+                    ],
+
+                    "total_items": sum(item.quantity for item in o.items),
                 })
 
-            print("👉 ALL ORDERS:", debug)
+            # ===============================
+            # 🔥 STAFF ORDERS (FIX)
+            # ===============================
+            staff_orders = (
+                db.session.query(StaffOrder)
+                .filter(StaffOrder.school_id == school_id)
+                .order_by(StaffOrder.created_at.desc())
+                .all()
+            )
 
+            for o in staff_orders:
+
+                items = StaffOrderItem.query.filter_by(
+                    staff_order_id=o.id
+                ).all()
+
+                items_data = []
+
+                for item in items:
+                    product = db.session.get(Product, item.product_id)
+                    size = db.session.get(ProductSize, item.size_id) if item.size_id else None
+
+                    items_data.append({
+                        "product_name": product.name if product else "N/A",
+                        "size": size.size if size else "N/A",
+                        "quantity": item.quantity,
+                        "unit_price": float(item.unit_price or 0),
+                        "total_price": float(item.total_price or 0),
+                    })
+
+                result.append({
+                    "id": o.id,
+                    "student_name": "Staff Order",   # differentiate
+                    "amount": float(o.total_amount or 0),
+                    "status": "paid",
+                    "payment_mode": "staff",
+                    "created_at": o.created_at.isoformat() if o.created_at else None,
+                    "items": items_data,
+                    "total_items": sum(i.quantity for i in items),
+                })
+
+            # ===============================
+            # 🔥 SORT COMBINED DATA
+            # ===============================
+            result.sort(
+                key=lambda x: x["created_at"] or "",
+                reverse=True
+            )
+
+            # ===============================
+            # ✅ FINAL RESPONSE
+            # ===============================
             return jsonify({
                 "success": True,
-                "debug": debug
+                "count": len(result),
+                "data": result
             }), 200
 
         except Exception as e:
-            print("ERROR:", str(e))
-            return jsonify({"success": False}), 500
+            print("ERROR IN SCHOOL ORDERS API:", str(e))
+
+            return jsonify({
+                "success": False,
+                "message": "Failed to fetch school orders"
+            }), 500
+
+    # @app.route('/api/admin/school-orders/<int:school_id>', methods=['GET'])
+    # def get_school_orders(school_id):
+    #     try:
+    #         print("👉 REQUESTED SCHOOL ID:", school_id)
+
+    #         orders = Order.query.filter_by(school_id=school_id).all()
+
+    #         result = []
+    #         for o in orders:
+    #             result.append({
+    #                 "id": o.id,
+    #                 "student_name": o.student.full_name if o.student else "N/A",
+    #                 "amount": o.total_amount,
+    #                 "status": o.payment_status,
+    #                 "items": [
+    #                     {
+    #                         "product_name": item.product.name,
+    #                         "size": item.size.size,
+    #                         "quantity": item.quantity,
+    #                         "total_price": item.total_price
+    #                     }
+    #                     for item in o.items
+    #                 ]
+    #             })
+
+    #         print("👉 FILTERED ORDERS:", result)
+
+    #         return jsonify({
+    #             "success": True,
+    #             "orders": result
+    #         }), 200
+
+    #     except Exception as e:
+    #         print("ERROR:", str(e))
+    #         return jsonify({"success": False}), 500
         
     @app.route('/api/admin/mark-seller-paid', methods=['POST'])
     @jwt_required()
