@@ -9903,6 +9903,8 @@ def create_app():
 
                 result.append({
                     "id": order.id,
+                    "type": "student",          # 🔥 ADD
+                    "returned": order.returned, # 🔥 ADD
                     "status": order.status,
                     "payment_status": order.payment_status,
                     "payment_mode": getattr(order, "payment_mode", "online"),
@@ -9947,10 +9949,12 @@ def create_app():
                     })
 
                 result.append({
-                    "order_id": order.id,
+                    "id": order.id,
+                    "type": "staff",
+                    "returned": False,
                     "status": order.status,
-                    "payment_status": "PAID",  # or None if you prefer
-                    "payment_mode": "staff",   # 🔥 differentiate
+                    "payment_status": "PAID",
+                    "payment_mode": "staff",
                     "total_amount": calculated_total,
                     "created_at": order.created_at.isoformat(),
                     "items": items_data
@@ -11034,7 +11038,8 @@ def create_app():
                 "COMMISSION_EARNED",
                 "ORDER_PAYMENT",
                 "ORDER_RETURN",
-                "COMMISSION_REVERSED"
+                "COMMISSION_REVERSED",
+                "ORDER_REFUND"   # ✅ ADD THIS
             ]
 
             # ====================================
@@ -11109,6 +11114,9 @@ def create_app():
                 "details": str(e)
             }), 500
         
+
+    from sqlalchemy import and_
+
     @app.route('/api/school/return-order/<int:order_id>', methods=['POST'])
     @jwt_required()
     @role_required(UserRole.SCHOOL)
@@ -11116,33 +11124,48 @@ def create_app():
 
         try:
             user = get_current_user()
+            data = request.get_json() or {}
 
-            order = db.session.get(Order, order_id)
-            if not order:
-                order = Order.query.filter_by(id=order_id).first()
+            order_type = data.get("type")  # student / staff
 
-            print("DEBUG ORDER ID:", order_id)
-            print("DEBUG ORDER OBJECT:", order)
+            if not order_type:
+                return jsonify({"error": "Order type is required"}), 400
+
+            order = None
+
+            # ====================================
+            # 🔍 FETCH ORDER
+            # ====================================
+            if order_type == "student":
+                order = db.session.get(Order, order_id)
+            elif order_type == "staff":
+                order = db.session.get(StaffOrder, order_id)
 
             if not order:
                 return jsonify({
-                    "error": "Order not found in DB",
-                    "order_id_received": order_id
+                    "error": "Order not found",
+                    "order_id": order_id,
+                    "type": order_type
                 }), 404
 
+            # ====================================
+            # 🔐 AUTHORIZATION
+            # ====================================
             if order.school_id != user.school_id:
                 return jsonify({"error": "Unauthorized"}), 403
 
             # ====================================
-            # ✅ ALLOW ONLY COMPLETED
+            # ✅ STATUS CHECK
             # ====================================
-            if order.status != "COMPLETED":
-                return jsonify({"error": "Only completed orders can be returned"}), 400
+            if str(order.status).upper() != "COMPLETED":
+                return jsonify({
+                    "error": "Only completed orders can be returned"
+                }), 400
 
             # ====================================
-            # ❌ PREVENT DUPLICATE RETURN
+            # ❌ DUPLICATE RETURN (STUDENT ONLY)
             # ====================================
-            if order.returned:
+            if order_type == "student" and getattr(order, "returned", False):
                 return jsonify({"message": "Order already returned"}), 200
 
             school = db.session.get(School, order.school_id)
@@ -11153,10 +11176,9 @@ def create_app():
             now = datetime.now(timezone.utc)
 
             # ====================================
-            # 🔁 STOCK REVERSAL
+            # 🔁 RESTORE STOCK (COMMON)
             # ====================================
             for item in order.items:
-
                 inventory = SchoolInventory.query.filter_by(
                     school_id=order.school_id,
                     product_id=item.product_id,
@@ -11168,18 +11190,24 @@ def create_app():
                     inventory.total_adjusted += item.quantity
 
             # ====================================
-            # 💰 COIN LOGIC
+            # 💰 CHECK IF COINS WERE USED (KEY LOGIC)
             # ====================================
-            commission = 0
+            coins_used = InventoryLedger.query.filter(
+                and_(
+                    InventoryLedger.reference_type == "ORDER",
+                    InventoryLedger.reference_id == order.id,
+                    InventoryLedger.transaction_type == "DEBIT",
+                    InventoryLedger.school_id == school.id
+                )
+            ).first()
 
             # ====================================
-            # ✅ REFUND COINS (IF USED)
+            # 💰 REFUND COINS IF USED
             # ====================================
-            if order.payment_mode and order.payment_mode.lower() == "coins":
+            if coins_used:
 
                 school.coin_balance += order.total_amount
 
-                # 📒 LEDGER: REFUND (CREDIT)
                 ledger_refund = InventoryLedger(
                     school_id=school.id,
                     action="ORDER_REFUND",
@@ -11191,19 +11219,17 @@ def create_app():
                     reference_id=order.id,
                     created_at=now
                 )
-
                 db.session.add(ledger_refund)
 
             # ====================================
-            # ✅ REVERSE COMMISSION
+            # 💰 REVERSE COMMISSION
             # ====================================
-            if order.commission_added:
+            commission = 0
 
+            if getattr(order, "commission_added", False):
                 commission = (order.total_amount * school.commission_percentage) / 100
-
                 school.coin_balance -= commission
 
-                # 📒 LEDGER: COMMISSION REVERSED (DEBIT)
                 ledger_commission = InventoryLedger(
                     school_id=school.id,
                     action="COMMISSION_REVERSED",
@@ -11215,25 +11241,32 @@ def create_app():
                     reference_id=order.id,
                     created_at=now
                 )
-
                 db.session.add(ledger_commission)
 
             # ====================================
             # 🔥 MARK RETURNED
             # ====================================
-            order.returned = True
+            if order_type == "student":
+                order.returned = True
+
             order.status = "RETURNED"
 
+            # ====================================
+            # 💾 COMMIT
+            # ====================================
             db.session.commit()
 
             return jsonify({
                 "message": "Order returned successfully",
+                "coins_refunded": bool(coins_used),
                 "commission_reversed": commission,
                 "current_balance": school.coin_balance
             }), 200
 
         except Exception as e:
             db.session.rollback()
+            print("RETURN ERROR:", str(e))
+
             return jsonify({
                 "error": "Failed to return order",
                 "details": str(e)
