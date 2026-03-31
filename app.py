@@ -2080,6 +2080,7 @@ def create_app():
             # 🔥 ADD COMMISSION
             # ====================================
             commission = order.add_commission_to_school()
+            commission = round(commission, 2)
 
             school = db.session.get(School, order.school_id)  # ✅ ALWAYS DEFINE
 
@@ -2092,8 +2093,8 @@ def create_app():
                     action="COMMISSION_EARNED",
                     transaction_type="CREDIT",
                     description=f"Commission earned from Order #{order.id}",
-                    quantity=commission,
-                    balance_after=school.coin_balance,
+                    quantity=float(commission),
+                    balance_after=float(school.coin_balance),
                     reference_type="ORDER",
                     reference_id=order.id,
                     created_at=now
@@ -3179,7 +3180,7 @@ def create_app():
                 # ✅ UPDATE ORDER
                 # ===============================
                 order.total_amount = total_amount
-                order.status = "COMPLETED"
+                order.status = "READY_FOR_HANDOVER"
 
                 if category_enum == CategoryType.STUDENT:
                     order.payment_status = "PAID"
@@ -11117,9 +11118,17 @@ def create_app():
             user = get_current_user()
 
             order = db.session.get(Order, order_id)
+            if not order:
+                order = Order.query.filter_by(id=order_id).first()
+
+            print("DEBUG ORDER ID:", order_id)
+            print("DEBUG ORDER OBJECT:", order)
 
             if not order:
-                return jsonify({"error": "Order not found"}), 404
+                return jsonify({
+                    "error": "Order not found in DB",
+                    "order_id_received": order_id
+                }), 404
 
             if order.school_id != user.school_id:
                 return jsonify({"error": "Unauthorized"}), 403
@@ -11250,4 +11259,5 @@ def create_app():
 # ===============================
 if __name__ == "__main__":
     app = create_app()
+    # print(app.url_map)
     app.run(host="0.0.0.0", port=5000, debug=True)
