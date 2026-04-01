@@ -7645,6 +7645,19 @@ def create_app():
             # ===============================
             # UPDATE IMAGES (FIXED)
             # ===============================
+            # =====================================================
+            # 🔥 HANDLE IMAGE DELETION (NEW - DO NOT BREAK EXISTING)
+            # =====================================================
+
+            existing_images = request.form.getlist("existing_images[]")
+
+            if existing_images is not None:
+
+                all_images = ProductImage.query.filter_by(product_id=product_id).all()
+
+                for img in all_images:
+                    if img.image_url not in existing_images:
+                        db.session.delete(img)
 
             images = request.files.getlist("product_images")
 
