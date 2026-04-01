@@ -3325,9 +3325,43 @@ def create_app():
             user = get_current_user()
             school = db.session.get(School, user.school_id)
             school_name = school.name if school and school.name else "School"
-            entries = InventoryLedger.query.filter_by(
-                school_id=user.school_id
-            ).order_by(InventoryLedger.created_at.desc()).all()
+            # ====================================
+            # 🔍 OPTIONAL FILTERS (SAME AS JSON API)
+            # ====================================
+            type_filter = request.args.get("type")
+            from_date = request.args.get("from_date")
+            to_date = request.args.get("to_date")
+
+            VALID_ACTIONS = [
+                "COMMISSION_EARNED",
+                "ORDER_PAYMENT",
+                "ORDER_RETURN",
+                "COMMISSION_REVERSED",
+                "ORDER_REFUND"
+            ]
+
+            query = InventoryLedger.query.filter(
+                InventoryLedger.school_id == user.school_id,
+                InventoryLedger.quantity != 0,
+                InventoryLedger.action.in_(VALID_ACTIONS)
+            )
+
+            if type_filter:
+                query = query.filter(
+                    InventoryLedger.transaction_type == type_filter.upper()
+                )
+
+            if from_date:
+                from_datetime = datetime.strptime(from_date, "%Y-%m-%d")
+                query = query.filter(InventoryLedger.created_at >= from_datetime)
+
+            if to_date:
+                to_datetime = datetime.strptime(to_date, "%Y-%m-%d")
+                query = query.filter(InventoryLedger.created_at <= to_datetime)
+
+            entries = query.order_by(
+                InventoryLedger.created_at.desc()
+            ).all()
 
             buffer = BytesIO()
             # Set margins for a more spacious feel
@@ -3364,7 +3398,7 @@ def create_app():
             )
 
             # 2. Header / Logo Section
-            logo_path = os.path.join(os.getcwd(), "static", "logo.png")
+            logo_path = os.path.join(app.root_path, "static", "logo.png")
             try:
                 logo = Image(logo_path, width=2*inch, height=0.8*inch)
                 logo.hAlign = 'CENTER'
@@ -3440,12 +3474,20 @@ def create_app():
             
             safe_name = school_name.replace(" ", "_")
             
-            return send_file(
+            response = send_file(
                 buffer,
                 as_attachment=True,
                 download_name=f"{safe_name}_Coin_Statement.pdf",
                 mimetype="application/pdf"
             )
+
+            # 🔥 ADD THESE HEADERS (CRITICAL FOR WEB DOWNLOAD)
+            response.headers["Content-Disposition"] = f"attachment; filename={safe_name}_Coin_Statement.pdf"
+            response.headers["Content-Type"] = "application/pdf"
+            response.headers["Access-Control-Allow-Origin"] = "*"
+            response.headers["Access-Control-Expose-Headers"] = "Content-Disposition"
+
+            return response
 
         except Exception as e:
             return {"error": str(e)}, 500
@@ -3705,9 +3747,21 @@ def create_app():
             school = db.session.get(School, school_id)
             school_name = school.name if school and school.name else "School"
 
-            entries = InventoryLedger.query.filter_by(
-                school_id=school_id
-            ).order_by(InventoryLedger.created_at.desc()).all()
+            COIN_ACTIONS = [
+                "COMMISSION_EARNED",
+                "ORDER_PAYMENT",
+                "ORDER_RETURN",
+                "COMMISSION_REVERSED"
+            ]
+
+            query = InventoryLedger.query.filter(
+                InventoryLedger.school_id == school_id,
+                InventoryLedger.action.in_(COIN_ACTIONS)
+            )
+
+            entries = query.order_by(
+                InventoryLedger.created_at.desc()
+            ).all()
 
             # ====================================
             # 💰 SUMMARY CALCULATIONS (NEW)
@@ -3768,7 +3822,7 @@ def create_app():
             # ====================================
             # 🏢 HEADER
             # ====================================
-            logo_path = os.path.join(os.getcwd(), "static", "logo.png")
+            logo_path = os.path.join(app.root_path, "static", "logo.png")
 
             if os.path.exists(logo_path):
                 try:
@@ -4927,11 +4981,11 @@ def create_app():
                     # 🔥 PRIORITY: ACTION BASED (MOST ACCURATE)
                     if "STUDENT" in action:
                         transaction_type = "STUDENT_PURCHASE"
-                        desc = "Student Purchase"
+                        desc = f"Student Purchase ({school_name or 'School'})"
 
                     elif "SCHOOL" in action or "STAFF" in action:
                         transaction_type = "SCHOOL_PURCHASE"
-                        desc = "School Purchase"
+                        desc = f"School Purchase ({school_name or 'School'})"
 
                     elif "RETURN" in action:
                         transaction_type = "RETURNED_FROM_SCHOOL"
@@ -4944,7 +4998,7 @@ def create_app():
                     # 🔥 FALLBACK (WHEN ACTION IS MISSING)
                     elif log.school_id and not log.seller_id:
                         transaction_type = "STUDENT_PURCHASE"
-                        desc = "Student Purchase"
+                        desc = f"Student Purchase ({school_name or 'School'})"
 
                     elif log.seller_id and log.school_id:
                         transaction_type = "SENT_TO_SCHOOL"
