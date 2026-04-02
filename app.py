@@ -6530,7 +6530,7 @@ def create_app():
         # ============================================================
 
         page = int(request.args.get("page", 1))
-        per_page = int(request.args.get("per_page", 10))
+        per_page = int(request.args.get("per_page", 1000))
         search = request.args.get("search", "").strip()
 
         query = School.query
