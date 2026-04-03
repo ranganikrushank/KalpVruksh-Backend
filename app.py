@@ -9171,6 +9171,10 @@ def create_app():
                     "size_id": r.size_id,
                     "school_id": r.school_id,
                     "product_name": r.product.name if r.product else "Unknown",
+                    "product_images": [
+                        img.image_url
+                        for img in r.product.images
+                    ] if r.product and r.product.images else [],
                     "size": r.size.size if r.size else "Standard",
                     "school_name": r.school.name if r.school else "Unknown",
                     "quantity": r.quantity,
@@ -9511,6 +9515,8 @@ def create_app():
             data.append({
                 "request_id": r.id,
                 "product_name": product.name if product else "Unknown",
+                "images": [img.image_url for img in product.images] 
+                if product and product.images else [],
                 "size": size.size if size else "Standard",
                 "seller_name": seller.name if seller else "",
                 "quantity": r.quantity,
