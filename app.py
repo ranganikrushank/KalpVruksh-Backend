@@ -9446,9 +9446,26 @@ def create_app():
                 continue
 
             if product.id not in products_map:
+
+                # ✅ GET PRODUCT IMAGES
+                images = []
+
+                # CASE 1: If you have ProductImage table
+                if hasattr(product, "images") and product.images:
+                    images = [img.image_url for img in product.images]
+
+                # CASE 2: If stored as JSON column
+                elif hasattr(product, "images"):
+                    images = product.images or []
+
+                # CASE 3: fallback (important)
+                if not images:
+                    images = ["https://dummyimage.com/200x200/cccccc/000000&text=No+Image"]
+
                 products_map[product.id] = {
                     "product_id": product.id,
                     "name": product.name,
+                    "images": images,   # ✅ ADD THIS LINE
                     "sizes": []
                 }
 
