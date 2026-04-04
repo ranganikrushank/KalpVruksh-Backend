@@ -2874,9 +2874,17 @@ def create_app():
 
                 for img in sorted_images:
                     if img.image_url and img.image_url.startswith("http"):
-                        images.append(img.image_url)
+                        images.append({
+                            "id": img.id,
+                            "url": img.image_url
+                        })
 
-            images = list(dict.fromkeys(images))  # remove duplicates
+            # remove duplicates based on URL
+            unique = {}
+            for img in images:
+                unique[img["url"]] = img
+
+            images = list(unique.values())
 
             for size in sizes:
 
@@ -8374,7 +8382,9 @@ def create_app():
             if product.id not in products_map:
 
                 images = [
-                    img.image_url
+                    {
+                        "url": img.image_url
+                    }
                     for img in ProductImage.query.filter_by(product_id=product.id).all()
                 ]
 
