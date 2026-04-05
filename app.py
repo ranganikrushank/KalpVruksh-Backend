@@ -366,55 +366,55 @@ def create_app():
     #             "error": str(e)
     #         }
     
-    # from sqlalchemy import text
+    from sqlalchemy import text
 
-    # @app.route('/reset-database', methods=['GET', 'POST'])
-    # def reset_database():
-    #     try:
+    @app.route('/reset-database', methods=['GET', 'POST'])
+    def reset_database():
+        try:
 
-    #         if os.getenv("ENV") == "production":
-    #             return {"error": "Not allowed in production"}, 403
+            if os.getenv("ENV") == "production":
+                return {"error": "Not allowed in production"}, 403
 
-    #         db.session.execute(text("""
-    #             DO $$ 
-    #             DECLARE 
-    #                 r RECORD;
-    #             BEGIN
-    #                 FOR r IN (
-    #                     SELECT tablename 
-    #                     FROM pg_tables 
-    #                     WHERE schemaname = 'public'
-    #                 )
-    #                 LOOP
-    #                     EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';
-    #                 END LOOP;
-    #             END $$;
-    #         """))
+            db.session.execute(text("""
+                DO $$ 
+                DECLARE 
+                    r RECORD;
+                BEGIN
+                    FOR r IN (
+                        SELECT tablename 
+                        FROM pg_tables 
+                        WHERE schemaname = 'public'
+                    )
+                    LOOP
+                        EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';
+                    END LOOP;
+                END $$;
+            """))
 
-    #         db.session.commit()
+            db.session.commit()
 
-    #         return {
-    #             "success": True,
-    #             "message": "🚀 Database fully reset"
-    #         }
+            return {
+                "success": True,
+                "message": "🚀 Database fully reset"
+            }
 
-    #     except Exception as e:
-    #         db.session.rollback()
-    #         return {
-    #             "success": False,
-    #             "error": str(e)
-    #         }, 500
+        except Exception as e:
+            db.session.rollback()
+            return {
+                "success": False,
+                "error": str(e)
+            }, 500
     
-    # @app.route("/check-db")
-    # def check_db():
-    #     from sqlalchemy import text
+    @app.route("/check-db")
+    def check_db():
+        from sqlalchemy import text
         
-    #     result = db.session.execute(text(
-    #         "SELECT table_name FROM information_schema.tables WHERE table_schema='public'"
-    #     ))
+        result = db.session.execute(text(
+            "SELECT table_name FROM information_schema.tables WHERE table_schema='public'"
+        ))
         
-    #     tables = [row[0] for row in result]
-    #     return {"tables": tables}
+        tables = [row[0] for row in result]
+        return {"tables": tables}
     
     @app.route("/api/whoami", methods=["GET"])
     @jwt_required()
@@ -3940,11 +3940,12 @@ def create_app():
             # ✅ STUDENT ORDERS
             # ===============================
             orders = (
-                db.session.query(Order)
-                .filter(Order.school_id == school_id)
-                .order_by(Order.created_at.desc())
-                .all()
-            )
+    db.session.query(Order)
+    .join(User, Order.student_id == User.id)
+    .filter(User.school_id == school_id)
+    .order_by(Order.created_at.desc())
+    .all()
+)
 
             for o in orders:
                 result.append({
