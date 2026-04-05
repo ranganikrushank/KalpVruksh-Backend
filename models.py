@@ -915,8 +915,8 @@ class InventoryLedger(db.Model):
     action = db.Column(db.String(100))
     # e.g. SCHOOL_RECEIVED, ORDER_SOLD, ADJUSTMENT
 
-    transaction_type = db.Column(db.String(10))
-    # CREDIT / DEBIT
+    transaction_type = db.Column(db.String(50))
+    # SELLER_ADD, SELLER_UPDATE, SENT_TO_SCHOOL, RETURNED_FROM_SCHOOL, SCHOOL_PURCHASE, STUDENT_PURCHASE
 
     description = db.Column(db.String(255))
     # e.g. "Seller 2 → School 5"

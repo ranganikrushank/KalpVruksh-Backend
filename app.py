@@ -247,54 +247,35 @@ def create_app():
     #         queries = [
 
     #             # ====================================
-    #             # ✅ SELLER PAYMENTS FIX
+    #             # 🔥 STEP 1: FIX WRONG DATA (CRITICAL FIRST)
     #             # ====================================
-    #             """
-    #             ALTER TABLE seller_payments
-    #             ALTER COLUMN product_id DROP NOT NULL;
-    #             """,
 
+    #             # ✅ Fix lowercase enum values
     #             """
-    #             ALTER TABLE seller_payments
-    #             DROP CONSTRAINT IF EXISTS seller_payments_product_id_fkey;
-    #             """,
-
-    #             """
-    #             ALTER TABLE seller_payments
-    #             ADD CONSTRAINT seller_payments_product_id_fkey
-    #             FOREIGN KEY (product_id)
-    #             REFERENCES products(id)
-    #             ON DELETE SET NULL;
+    #             UPDATE inventory_ledger
+    #             SET category = UPPER(category)
+    #             WHERE category IS NOT NULL;
     #             """,
 
     #             # ====================================
-    #             # ✅ ORDERS UPGRADE
+    #             # 🔥 STEP 2: FIX INVENTORY LEDGER STRUCTURE
     #             # ====================================
-    #             """
-    #             ALTER TABLE orders
-    #             ADD COLUMN IF NOT EXISTS commission_added BOOLEAN DEFAULT FALSE;
-    #             """,
 
+    #             # ✅ Increase column size
     #             """
-    #             ALTER TABLE orders
-    #             ADD COLUMN IF NOT EXISTS returned BOOLEAN DEFAULT FALSE;
+    #             ALTER TABLE inventory_ledger
+    #             ALTER COLUMN transaction_type TYPE VARCHAR(50);
     #             """,
-
-    #             # ====================================
-    #             # ✅ STAFF ORDERS
-    #             # ====================================
-    #             """
-    #             ALTER TABLE staff_orders
-    #             ADD COLUMN IF NOT EXISTS commission_added BOOLEAN DEFAULT FALSE;
-    #             """,
-
-    #             # ====================================
-    #             # 🔥 INVENTORY LEDGER UPGRADE
-    #             # ====================================
 
     #             """
     #             ALTER TABLE inventory_ledger
-    #             ADD COLUMN IF NOT EXISTS transaction_type VARCHAR(10);
+    #             ALTER COLUMN reference_type TYPE VARCHAR(50);
+    #             """,
+
+    #             # ✅ Ensure columns exist (safe fallback)
+    #             """
+    #             ALTER TABLE inventory_ledger
+    #             ADD COLUMN IF NOT EXISTS transaction_type VARCHAR(50);
     #             """,
 
     #             """
@@ -302,7 +283,9 @@ def create_app():
     #             ADD COLUMN IF NOT EXISTS description VARCHAR(255);
     #             """,
 
-    #             # 🔥 NEW: CATEGORY COLUMN
+    #             # ====================================
+    #             # 🔥 CATEGORY COLUMN (SAFE ADD)
+    #             # ====================================
     #             """
     #             DO $$ 
     #             BEGIN
@@ -317,55 +300,34 @@ def create_app():
     #             """,
 
     #             # ====================================
-    #             # 🚨 DATA CLEANUP
+    #             # ✅ STEP 3: CLEANUP DATA
     #             # ====================================
 
-    #             """
-    #             DELETE FROM inventory_ledger
-    #             WHERE action IN ('STUDENT_PURCHASE', 'STAFF_PURCHASE');
-    #             """,
-
-    #             """
-    #             DELETE FROM inventory_ledger
-    #             WHERE description IS NULL OR description = '';
-    #             """,
-
-    #             # ====================================
-    #             # ✅ FIX EXISTING DATA
-    #             # ====================================
-
-    #             # Default transaction type
     #             """
     #             UPDATE inventory_ledger
     #             SET transaction_type = 'CREDIT'
     #             WHERE transaction_type IS NULL;
     #             """,
 
-    #             # Fix debit entries
-    #             """
-    #             UPDATE inventory_ledger
-    #             SET transaction_type = 'DEBIT'
-    #             WHERE quantity < 0;
-    #             """,
-
-    #             # Normalize quantity
     #             """
     #             UPDATE inventory_ledger
     #             SET quantity = ABS(quantity);
     #             """,
 
-    #             # ====================================
-    #             # 🔥 OPTIONAL: SET CATEGORY DEFAULT (SAFE)
-    #             # ====================================
     #             """
     #             UPDATE inventory_ledger
-    #             SET category = 'student'
+    #             SET category = 'STUDENT'
     #             WHERE category IS NULL;
     #             """,
 
     #             # ====================================
     #             # 🚀 INDEXES (PERFORMANCE)
     #             # ====================================
+
+    #             """
+    #             CREATE INDEX IF NOT EXISTS idx_ledger_seller
+    #             ON inventory_ledger (seller_id);
+    #             """,
 
     #             """
     #             CREATE INDEX IF NOT EXISTS idx_ledger_school
@@ -375,16 +337,6 @@ def create_app():
     #             """
     #             CREATE INDEX IF NOT EXISTS idx_ledger_created_at
     #             ON inventory_ledger (created_at DESC);
-    #             """,
-
-    #             """
-    #             CREATE INDEX IF NOT EXISTS idx_ledger_reference
-    #             ON inventory_ledger (reference_type, reference_id);
-    #             """,
-
-    #             """
-    #             CREATE INDEX IF NOT EXISTS idx_ledger_category
-    #             ON inventory_ledger (category);
     #             """,
 
     #             # ====================================
@@ -404,7 +356,7 @@ def create_app():
 
     #         return {
     #             "success": True,
-    #             "message": "DB upgraded successfully (ledger + category fully fixed)"
+    #             "message": "✅ DB fully fixed (enum + varchar + data cleanup)"
     #         }
 
     #     except Exception as e:
@@ -414,44 +366,44 @@ def create_app():
     #             "error": str(e)
     #         }
     
-    from sqlalchemy import text
+    # from sqlalchemy import text
 
-    @app.route('/reset-database', methods=['GET', 'POST'])
-    def reset_database():
-        try:
+    # @app.route('/reset-database', methods=['GET', 'POST'])
+    # def reset_database():
+    #     try:
 
-            if os.getenv("ENV") == "production":
-                return {"error": "Not allowed in production"}, 403
+    #         if os.getenv("ENV") == "production":
+    #             return {"error": "Not allowed in production"}, 403
 
-            db.session.execute(text("""
-                DO $$ 
-                DECLARE 
-                    r RECORD;
-                BEGIN
-                    FOR r IN (
-                        SELECT tablename 
-                        FROM pg_tables 
-                        WHERE schemaname = 'public'
-                    )
-                    LOOP
-                        EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';
-                    END LOOP;
-                END $$;
-            """))
+    #         db.session.execute(text("""
+    #             DO $$ 
+    #             DECLARE 
+    #                 r RECORD;
+    #             BEGIN
+    #                 FOR r IN (
+    #                     SELECT tablename 
+    #                     FROM pg_tables 
+    #                     WHERE schemaname = 'public'
+    #                 )
+    #                 LOOP
+    #                     EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE';
+    #                 END LOOP;
+    #             END $$;
+    #         """))
 
-            db.session.commit()
+    #         db.session.commit()
 
-            return {
-                "success": True,
-                "message": "🚀 Database fully reset"
-            }
+    #         return {
+    #             "success": True,
+    #             "message": "🚀 Database fully reset"
+    #         }
 
-        except Exception as e:
-            db.session.rollback()
-            return {
-                "success": False,
-                "error": str(e)
-            }, 500
+    #     except Exception as e:
+    #         db.session.rollback()
+    #         return {
+    #             "success": False,
+    #             "error": str(e)
+    #         }, 500
     
     # @app.route("/check-db")
     # def check_db():
@@ -3695,6 +3647,7 @@ def create_app():
                 "COMMISSION_EARNED",
                 "ORDER_PAYMENT",
                 "ORDER_RETURN",
+                "ORDER_REFUND",
                 "COMMISSION_REVERSED"
             ]
 
@@ -3708,11 +3661,17 @@ def create_app():
             result = []
 
             for e in entries:
+                
+                # print("ADMIN LEDGER:", e.action, e.quantity, e.balance_after)
 
                 # ✅ MAP CREDIT / DEBIT
-                if e.action in ["COMMISSION_EARNED", "ORDER_RETURN"]:
+                if e.action == "COMMISSION_EARNED":
                     tx = "CREDIT"
-                elif e.action in ["ORDER_PAYMENT", "COMMISSION_REVERSED"]:
+                elif e.action == "ORDER_RETURN":
+                    tx = "CREDIT"   # 🔥 coins coming back
+                elif e.action == "ORDER_PAYMENT":
+                    tx = "DEBIT"
+                elif e.action == "COMMISSION_REVERSED":
                     tx = "DEBIT"
                 else:
                     tx = "NEUTRAL"
@@ -3720,13 +3679,14 @@ def create_app():
                 # ✅ APPLY FILTER
                 if tx_type and tx != tx_type:
                     continue
-
+                
+                amount = abs(e.quantity)
                 result.append({
                     "id": e.id,
                     "action": e.action,
                     "type": tx,
                     "description": e.description,
-                    "amount": abs(e.quantity),  # ✅ USE QUANTITY BUT SAFE
+                    "amount": amount,  # ✅ USE QUANTITY BUT SAFE
                     "balance_after": e.balance_after,
                     "created_at": e.created_at.isoformat()
                 })
@@ -4931,7 +4891,7 @@ def create_app():
                 query = query.filter(InventoryLedger.school_id == school_id)
 
             # ================= SORT =================
-            logs = query.order_by(InventoryLedger.created_at.desc()).all()
+            logs = query.order_by(InventoryLedger.created_at.asc()).all()
 
             result = []
 
@@ -4941,12 +4901,19 @@ def create_app():
                 seller = Seller.query.get(log.seller_id) if log.seller_id else None
                 school = School.query.get(log.school_id) if log.school_id else None
                 size = ProductSize.query.get(log.size_id) if log.size_id else None
+                
+                has_sizes = ProductSize.query.filter_by(product_id=log.product_id).first() is not None
+                if has_sizes and not log.size_id:
+                    continue
 
                 product_name = product.name if product else "Product"
                 size_name = size.size if size else None
 
-                seller_name = seller.name if seller else None
-                school_name = school.name if school else None
+                seller_name = seller.name if seller and seller.name else None
+                school_name = school.name if school and school.name else None
+
+                seller_display = seller_name if seller_name else "Seller"
+                school_display = school_name if school_name else "School"
 
                 # ================= FILTER TYPE =================
                 if tx_type == "in" and log.quantity <= 0:
@@ -4958,63 +4925,61 @@ def create_app():
                 if search and search.lower() not in product_name.lower():
                     continue
 
+                # ======================================================
+                # ✅ CLEAN NON-DUPLICATE CLASSIFICATION (NO OVERLAP)
+                # ======================================================
+
                 action = (log.action or "").upper()
+                # ❌ REMOVE NON-INVENTORY ENTRIES COMPLETELY
+                NON_INVENTORY = ["ORDER_REFUND", "COMMISSION_REVERSED", "ORDER_PAYMENT", "COMMISSION_EARNED"]
 
-                # ======================================================
-                # 🔥 FINAL ACCURATE TRANSACTION CLASSIFICATION
-                # ======================================================
+                if action in NON_INVENTORY:
+                    continue
 
-                # ================= INCOMING =================
-                if log.quantity > 0:
+                transaction_type = "UNKNOWN"
+                desc = "Transaction"
 
-                    if "ADD" in action:
-                        transaction_type = "SELLER_ADD"
-                        desc = "Stock Added by Seller"
+                # ================= SKIP NON-STOCK =================
+                # if action in ["COMMISSION_EARNED", "ORDER_PAYMENT"]:
+                #     continue
 
-                    elif "RETURN" in action:
-                        transaction_type = "RETURNED_FROM_SCHOOL"
-                        desc = f"{school_name or 'School'} → {seller_name or 'Seller'}"
+                # ================= SELLER → SCHOOL =================
+                if action == "SCHOOL_RECEIVED" and log.seller_id and log.school_id:
+                    transaction_type = "SENT_TO_SCHOOL"
+                    desc = f"Sent to School ({seller_display} → {school_display})"
 
-                    elif log.seller_id and log.school_id:
-                        transaction_type = "SENT_TO_SCHOOL"
-                        desc = f"{seller_name or 'Seller'} → {school_name or 'School'}"
+                # ================= STUDENT PURCHASE =================
+                elif action == "SOLD_TO_STUDENT":
+                    transaction_type = "STUDENT_PURCHASE"
+                    desc = f"Student Purchase ({school_display})"
 
-                    else:
-                        transaction_type = "SELLER_UPDATE"
-                        desc = "Stock Updated"
+                # ================= SELLER ADD =================
+                elif action == "ALLOCATED" and log.seller_id:
+                    transaction_type = "SELLER_ADD"
+                    desc = f"Stock Added ({seller_display})"
+                    
+                # ================= STOCK UPDATED =================
+                elif action == "STOCK_UPDATED" and log.seller_id:
+                    transaction_type = "SELLER_UPDATE"
+                    desc = f"Stock Updated ({seller_display}, {'+' if log.quantity > 0 else ''}{log.quantity})"
 
-                # ================= OUTGOING =================
-                else:
+                # ================= SCHOOL → SELLER =================
+                elif action in ["ORDER_REFUND", "COMMISSION_REVERSED"] and log.seller_id and log.school_id:
+                    transaction_type = "RETURNED_FROM_SCHOOL"
+                    desc = f"{school_name or 'School'} → {seller_name or 'Seller'}"
 
-                    # 🔥 PRIORITY: ACTION BASED (MOST ACCURATE)
-                    if "STUDENT" in action:
-                        transaction_type = "STUDENT_PURCHASE"
-                        desc = f"Student Purchase ({school_name or 'School'})"
+                # ================= FALLBACK =================
+                    # elif log.quantity > 0:
+                    #     transaction_type = "SELLER_ADD"
+                    #     desc = "Stock Added"
 
-                    elif "SCHOOL" in action or "STAFF" in action:
-                        transaction_type = "SCHOOL_PURCHASE"
-                        desc = f"School Purchase ({school_name or 'School'})"
+                elif log.quantity < 0:
+                    transaction_type = "STUDENT_PURCHASE"
+                    desc = "Student Purchase"
 
-                    elif "RETURN" in action:
-                        transaction_type = "RETURNED_FROM_SCHOOL"
-                        desc = f"{school_name or 'School'} → {seller_name or 'Seller'}"
-
-                    elif "SEND" in action or "SHIP" in action:
-                        transaction_type = "SENT_TO_SCHOOL"
-                        desc = f"{seller_name or 'Seller'} → {school_name or 'School'}"
-
-                    # 🔥 FALLBACK (WHEN ACTION IS MISSING)
-                    elif log.school_id and not log.seller_id:
-                        transaction_type = "STUDENT_PURCHASE"
-                        desc = f"Student Purchase ({school_name or 'School'})"
-
-                    elif log.seller_id and log.school_id:
-                        transaction_type = "SENT_TO_SCHOOL"
-                        desc = f"{seller_name or 'Seller'} → {school_name or 'School'}"
-
-                    else:
-                        transaction_type = "SELLER_UPDATE"
-                        desc = "Stock Updated"
+                elif log.quantity > 0 and log.seller_id:
+                    transaction_type = "SELLER_ADD"
+                    desc = "Stock Added"
 
                 # ================= DATE =================
                 created_at = (
@@ -6699,13 +6664,22 @@ def create_app():
     def seller_statement():
 
         user = get_current_user()
+        # print("SELLER ID:", user.seller_id)
+
+        all_tx = InventoryLedger.query.all()
+        # print("TOTAL LEDGER:", len(all_tx))
+
+        seller_tx = InventoryLedger.query.filter(
+            InventoryLedger.seller_id == user.seller_id
+        ).all()
+        # print("SELLER LEDGER:", len(seller_tx))
 
         product_id = request.args.get("product_id")
         start_date = request.args.get("start_date")
         end_date = request.args.get("end_date")
 
-        query = InventoryLedger.query.filter_by(
-            seller_id=user.seller_id
+        query = InventoryLedger.query.filter(
+            InventoryLedger.seller_id == user.seller_id
         )
 
         if product_id:
@@ -7325,13 +7299,22 @@ def create_app():
 
         old_quantity = inv.remaining_stock
         difference = new_quantity - old_quantity
+        
+        if difference == 0:
+            return jsonify({
+                "message": "No change in stock",
+                "old": old_quantity,
+                "new": new_quantity
+            })
 
         inv.remaining_stock = new_quantity
 
         ledger = InventoryLedger(
             product_id=product_id,
+            size_id=size_id,  # ✅ ADD THIS (IMPORTANT)
             seller_id=user.seller_id,
-            action="MANUAL_STOCK_EDIT",
+            school_id=None,   # ✅ EXPLICIT (clean separation)
+            action="STOCK_UPDATED",  # 🔥 CHANGE ACTION
             quantity=difference,
             balance_after=new_quantity,
             reference_type="MANUAL_EDIT"
@@ -10314,6 +10297,45 @@ def create_app():
         req.shipped_at = datetime.utcnow()
 
         db.session.commit()
+        
+        # ================== ADD START ==================
+
+        # ✅ UPDATE SELLER INVENTORY
+        seller_inventory = SellerInventory.query.filter_by(
+            seller_id=req.seller_id,
+            product_id=req.product_id,
+            size_id=req.size_id
+        ).first()
+
+        if seller_inventory:
+            seller_inventory.remaining_stock += req.quantity
+        else:
+            seller_inventory = SellerInventory(
+                seller_id=req.seller_id,
+                product_id=req.product_id,
+                size_id=req.size_id,
+                remaining_stock=req.quantity
+            )
+            db.session.add(seller_inventory)
+
+        # ✅ CREATE LEDGER ENTRY
+        ledger = InventoryLedger(
+            product_id=req.product_id,
+            size_id=req.size_id,
+            seller_id=req.seller_id,
+            school_id=req.school_id,
+            action="SCHOOL_RETURNED",
+            transaction_type="FROM_SCHOOL",
+            quantity=req.quantity,
+            balance_after=seller_inventory.remaining_stock,
+            reference_type="SHIPMENT",
+            reference_id=req.id
+        )
+
+        db.session.add(ledger)
+        db.session.commit()
+
+        # ================== ADD END ==================
 
         return jsonify({"message": "Shipped"}), 200
     
@@ -11310,7 +11332,7 @@ def create_app():
 
                 ledger_refund = InventoryLedger(
                     school_id=school.id,
-                    action="ORDER_REFUND",
+                    action="ORDER_RETURN",
                     transaction_type="CREDIT",
                     description=f"Refund for Order #{order.id}",
                     quantity=order.total_amount,
