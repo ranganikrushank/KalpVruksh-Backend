@@ -1097,14 +1097,15 @@ def create_app():
                 ProductSize.size.label("size"),
                 ProductSize.discounted_price.label("size_discount_price"),
                 ProductSize.real_price.label("size_real_price"),
-                db.func.sum(SchoolInventory.quantity).label("school_stock"),
+                db.func.sum(db.distinct(SchoolInventory.quantity)).label("school_stock"),
             )
             .join(Product, Product.id == SchoolInventory.product_id)
             .join(ProductSize, ProductSize.id == SchoolInventory.size_id)
             .join(School, School.id == SchoolInventory.school_id)
             .outerjoin(
                 SellerSchoolProduct,
-                SellerSchoolProduct.product_id == Product.id
+                (SellerSchoolProduct.product_id == Product.id) &
+                (SellerSchoolProduct.school_id == School.id)
             )
             .outerjoin(
                 Seller,
@@ -1112,6 +1113,7 @@ def create_app():
             )
             .group_by(
                 School.name,
+                Seller.id,
                 Seller.name,
                 Product.name,
                 Product.unit_price,
@@ -1122,6 +1124,7 @@ def create_app():
             )
             .order_by(
                 School.name,
+                Seller.id,
                 Seller.name,
                 Product.name
             )
@@ -4979,7 +4982,7 @@ def create_app():
 
                 elif log.quantity > 0 and log.seller_id:
                     transaction_type = "SELLER_ADD"
-                    desc = "Stock Added"
+                    desc = f"School Return ({school_display})"
 
                 # ================= DATE =================
                 created_at = (
