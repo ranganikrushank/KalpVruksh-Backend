@@ -238,133 +238,166 @@ def create_app():
         )
         db.session.add(audit)
         
-    # from sqlalchemy import text
+    from sqlalchemy import text
 
-    # @app.route('/fix-db', methods=['GET'])
-    # def fix_db():
-    #     try:
+    @app.route('/fix-db', methods=['GET'])
+    def fix_db():
+        try:
 
-    #         queries = [
+            queries = [
 
-    #             # ====================================
-    #             # 🔥 STEP 1: FIX WRONG DATA (CRITICAL FIRST)
-    #             # ====================================
+                # ====================================
+                # 🔥 STEP 1: FIX EXISTING DATA
+                # ====================================
 
-    #             # ✅ Fix lowercase enum values
-    #             """
-    #             UPDATE inventory_ledger
-    #             SET category = UPPER(category)
-    #             WHERE category IS NOT NULL;
-    #             """,
+                """
+                UPDATE inventory_ledger
+                SET category = UPPER(category)
+                WHERE category IS NOT NULL;
+                """,
 
-    #             # ====================================
-    #             # 🔥 STEP 2: FIX INVENTORY LEDGER STRUCTURE
-    #             # ====================================
+                """
+                UPDATE inventory_ledger
+                SET transaction_type = 'CREDIT'
+                WHERE transaction_type IS NULL;
+                """,
 
-    #             # ✅ Increase column size
-    #             """
-    #             ALTER TABLE inventory_ledger
-    #             ALTER COLUMN transaction_type TYPE VARCHAR(50);
-    #             """,
+                """
+                UPDATE inventory_ledger
+                SET quantity = ABS(quantity)
+                WHERE quantity IS NOT NULL;
+                """,
 
-    #             """
-    #             ALTER TABLE inventory_ledger
-    #             ALTER COLUMN reference_type TYPE VARCHAR(50);
-    #             """,
+                """
+                UPDATE inventory_ledger
+                SET category = 'STUDENT'
+                WHERE category IS NULL;
+                """,
 
-    #             # ✅ Ensure columns exist (safe fallback)
-    #             """
-    #             ALTER TABLE inventory_ledger
-    #             ADD COLUMN IF NOT EXISTS transaction_type VARCHAR(50);
-    #             """,
+                # ====================================
+                # 🔥 STEP 2: INVENTORY LEDGER STRUCTURE
+                # ====================================
 
-    #             """
-    #             ALTER TABLE inventory_ledger
-    #             ADD COLUMN IF NOT EXISTS description VARCHAR(255);
-    #             """,
+                """
+                ALTER TABLE inventory_ledger
+                ALTER COLUMN transaction_type TYPE VARCHAR(50);
+                """,
 
-    #             # ====================================
-    #             # 🔥 CATEGORY COLUMN (SAFE ADD)
-    #             # ====================================
-    #             """
-    #             DO $$ 
-    #             BEGIN
-    #                 IF NOT EXISTS (
-    #                     SELECT 1 FROM information_schema.columns 
-    #                     WHERE table_name='inventory_ledger' AND column_name='category'
-    #                 ) THEN
-    #                     ALTER TABLE inventory_ledger
-    #                     ADD COLUMN category VARCHAR(20);
-    #                 END IF;
-    #             END$$;
-    #             """,
+                """
+                ALTER TABLE inventory_ledger
+                ALTER COLUMN reference_type TYPE VARCHAR(50);
+                """,
 
-    #             # ====================================
-    #             # ✅ STEP 3: CLEANUP DATA
-    #             # ====================================
+                """
+                ALTER TABLE inventory_ledger
+                ADD COLUMN IF NOT EXISTS transaction_type VARCHAR(50);
+                """,
 
-    #             """
-    #             UPDATE inventory_ledger
-    #             SET transaction_type = 'CREDIT'
-    #             WHERE transaction_type IS NULL;
-    #             """,
+                """
+                ALTER TABLE inventory_ledger
+                ADD COLUMN IF NOT EXISTS description VARCHAR(255);
+                """,
 
-    #             """
-    #             UPDATE inventory_ledger
-    #             SET quantity = ABS(quantity);
-    #             """,
+                # SAFE CATEGORY COLUMN
+                """
+                DO $$ 
+                BEGIN
+                    IF NOT EXISTS (
+                        SELECT 1 FROM information_schema.columns 
+                        WHERE table_name='inventory_ledger' AND column_name='category'
+                    ) THEN
+                        ALTER TABLE inventory_ledger
+                        ADD COLUMN category VARCHAR(20);
+                    END IF;
+                END$$;
+                """,
 
-    #             """
-    #             UPDATE inventory_ledger
-    #             SET category = 'STUDENT'
-    #             WHERE category IS NULL;
-    #             """,
+                # DEFAULT
+                """
+                ALTER TABLE inventory_ledger
+                ALTER COLUMN transaction_type SET DEFAULT 'CREDIT';
+                """,
 
-    #             # ====================================
-    #             # 🚀 INDEXES (PERFORMANCE)
-    #             # ====================================
+                # ====================================
+                # 🚀 STEP 3: SELLER PAYMENT UPGRADE (IMPORTANT)
+                # ====================================
 
-    #             """
-    #             CREATE INDEX IF NOT EXISTS idx_ledger_seller
-    #             ON inventory_ledger (seller_id);
-    #             """,
+                # ✅ Add payment_mode
+                """
+                ALTER TABLE seller_payments
+                ADD COLUMN IF NOT EXISTS payment_mode VARCHAR(20) DEFAULT 'CASH';
+                """,
 
-    #             """
-    #             CREATE INDEX IF NOT EXISTS idx_ledger_school
-    #             ON inventory_ledger (school_id);
-    #             """,
+                # ✅ Add payment_details JSON
+                """
+                ALTER TABLE seller_payments
+                ADD COLUMN IF NOT EXISTS payment_details JSON;
+                """,
 
-    #             """
-    #             CREATE INDEX IF NOT EXISTS idx_ledger_created_at
-    #             ON inventory_ledger (created_at DESC);
-    #             """,
+                # ✅ Fix old NULL modes
+                """
+                UPDATE seller_payments
+                SET payment_mode = 'CASH'
+                WHERE payment_mode IS NULL;
+                """,
 
-    #             # ====================================
-    #             # ✅ DEFAULTS
-    #             # ====================================
+                # ====================================
+                # 🚀 STEP 4: INDEXES (PERFORMANCE BOOST)
+                # ====================================
 
-    #             """
-    #             ALTER TABLE inventory_ledger
-    #             ALTER COLUMN transaction_type SET DEFAULT 'CREDIT';
-    #             """,
-    #         ]
+                """
+                CREATE INDEX IF NOT EXISTS idx_ledger_seller
+                ON inventory_ledger (seller_id);
+                """,
 
-    #         for q in queries:
-    #             db.session.execute(text(q))
+                """
+                CREATE INDEX IF NOT EXISTS idx_ledger_school
+                ON inventory_ledger (school_id);
+                """,
 
-    #         db.session.commit()
+                """
+                CREATE INDEX IF NOT EXISTS idx_ledger_created_at
+                ON inventory_ledger (created_at DESC);
+                """,
 
-    #         return {
-    #             "success": True,
-    #             "message": "✅ DB fully fixed (enum + varchar + data cleanup)"
-    #         }
+                """
+                CREATE INDEX IF NOT EXISTS idx_payment_seller
+                ON seller_payments (seller_id);
+                """,
 
-    #     except Exception as e:
-    #         db.session.rollback()
-    #         return {
-    #             "success": False,
-    #             "error": str(e)
-    #         }
+                """
+                CREATE INDEX IF NOT EXISTS idx_payment_mode
+                ON seller_payments (payment_mode);
+                """,
+
+                # ====================================
+                # 🚀 STEP 5: DATA SAFETY NORMALIZATION
+                # ====================================
+
+                """
+                UPDATE seller_payments
+                SET payment_details = '{}'::json
+                WHERE payment_details IS NULL;
+                """,
+
+            ]
+
+            for q in queries:
+                db.session.execute(text(q))
+
+            db.session.commit()
+
+            return {
+                "success": True,
+                "message": "✅ DB fully upgraded (ledger + payments + indexes + cleanup)"
+            }
+
+        except Exception as e:
+            db.session.rollback()
+            return {
+                "success": False,
+                "error": str(e)
+            }
     
     # from sqlalchemy import text
 
@@ -3619,6 +3652,8 @@ def create_app():
 
                 data["payment_status"] = "PAID" if payment else "UNPAID"
                 data["paid_on"] = payment.created_at.isoformat() if payment else None
+                data["payment_mode"] = payment.payment_mode if payment else None
+                data["payment_details"] = payment.payment_details if payment else {}                
 
                 result.append(data)
 
@@ -4084,6 +4119,11 @@ def create_app():
             month = int(data.get("month"))
             year = int(data.get("year"))
             total_amount = float(data.get("total_amount"))
+            payment_mode = data.get("payment_mode", "CASH")
+            payment_details = data.get("payment_details", {})
+            
+            if payment_mode != "CASH" and not payment_details:
+                return jsonify({"error": "Payment details required"}), 400
 
             # ===== DATE RANGE =====
             start_date = datetime(year, month, 1).date()
@@ -4091,10 +4131,10 @@ def create_app():
             end_date = datetime(year, month, last_day).date()
 
             # ===== CHECK DUPLICATE =====
-            existing = SellerPayment.query.filter_by(
-                seller_id=seller_id,
-                from_date=start_date,
-                to_date=end_date
+            existing = SellerPayment.query.filter(
+                SellerPayment.seller_id == seller_id,
+                SellerPayment.from_date == start_date,
+                SellerPayment.to_date == end_date
             ).first()
 
             if existing:
@@ -4106,7 +4146,8 @@ def create_app():
                 product_id=None,  # Not needed (month-based payment)
                 from_date=start_date,
                 to_date=end_date,
-                paid_amount=total_amount
+                paid_amount=total_amount,payment_mode=payment_mode,
+                payment_details=payment_details
             )
 
             db.session.add(payment)
