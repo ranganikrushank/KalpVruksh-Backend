@@ -3509,7 +3509,7 @@ def create_app():
             user = User.query.get(current_user_id)
 
             seller_id_filter = None
-            if user_role == "seller":
+            if user_role == UserRole.SELLER.value:
                 seller_id_filter = user.seller_id
 
             # ===== DATE RANGE =====
@@ -3643,12 +3643,11 @@ def create_app():
                 data["products"] = list(data["products_map"].values())
                 del data["products_map"]
 
-                payment = SellerPayment.query.filter_by(
-                    seller_id=seller_id
-                ).filter(
-                    SellerPayment.from_date == start_date.date(),
-                    SellerPayment.to_date == end_date.date()
-                ).first()
+                payment = SellerPayment.query.filter(
+                    SellerPayment.seller_id == seller_id,
+                    SellerPayment.from_date >= start_date.date(),
+                    SellerPayment.to_date <= end_date.date()
+                ).order_by(SellerPayment.created_at.desc()).first()
 
                 data["payment_status"] = "PAID" if payment else "UNPAID"
                 data["paid_on"] = payment.created_at.isoformat() if payment else None
@@ -4119,10 +4118,10 @@ def create_app():
             month = int(data.get("month"))
             year = int(data.get("year"))
             total_amount = float(data.get("total_amount"))
-            payment_mode = data.get("payment_mode", "CASH")
-            payment_details = data.get("payment_details", {})
+            payment_mode = data.get("payment_mode") or "CASH"
+            payment_details = data.get("payment_details") or {}
             
-            if payment_mode != "CASH" and not payment_details:
+            if payment_mode != "CASH" and (not payment_details or len(payment_details) == 0):
                 return jsonify({"error": "Payment details required"}), 400
 
             # ===== DATE RANGE =====
@@ -4162,6 +4161,41 @@ def create_app():
             db.session.rollback()
             print("Payment Error:", str(e))
             return jsonify({"error": "Failed to mark payment"}), 500
+        
+    @app.route('/api/seller/revenue-dashboard', methods=['GET'])
+    @jwt_required()
+    def seller_revenue_dashboard():
+
+        try:
+            month = int(request.args.get("month"))
+            year = int(request.args.get("year"))
+
+            current_user_id = get_jwt_identity()
+            user = User.query.get(current_user_id)
+
+            seller_id = user.seller_id
+
+            start_date = datetime(year, month, 1).date()
+            last_day = monthrange(year, month)[1]
+            end_date = datetime(year, month, last_day).date()
+
+            # ===== GET PAYMENT DIRECTLY =====
+            payment = SellerPayment.query.filter(
+                SellerPayment.seller_id == seller_id,
+                SellerPayment.from_date == start_date,
+                SellerPayment.to_date == end_date
+            ).order_by(SellerPayment.id.desc()).first()
+
+            return jsonify({
+                "seller_id": seller_id,
+                "payment_status": "PAID" if payment else "UNPAID",
+                "payment_mode": payment.payment_mode if payment else None,
+                "payment_details": payment.payment_details if payment else {}
+            }), 200
+
+        except Exception as e:
+            print("Seller Dashboard Error:", str(e))
+            return jsonify({"error": "Failed"}), 500
     
     @app.route('/api/admin/payments', methods=['GET'])
     @jwt_required()

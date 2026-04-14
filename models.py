@@ -215,10 +215,18 @@ class Product(db.Model):
 
 # ================= INVENTORY =================
 
+from datetime import datetime
+from models import db
+
+
 class SellerPayment(db.Model):
     __tablename__ = "seller_payments"
 
     id = db.Column(db.Integer, primary_key=True)
+
+    # =========================================
+    # RELATIONS
+    # =========================================
 
     seller_id = db.Column(
         db.Integer,
@@ -232,16 +240,112 @@ class SellerPayment(db.Model):
         nullable=True
     )
 
+    # =========================================
+    # PAYMENT PERIOD
+    # =========================================
+
     from_date = db.Column(db.Date, nullable=False)
     to_date = db.Column(db.Date, nullable=False)
 
+    # =========================================
+    # PAYMENT CORE
+    # =========================================
+
     paid_amount = db.Column(db.Float, nullable=False)
 
-    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    # ✅ NEW — PAYMENT MODE
+    payment_mode = db.Column(
+        db.String(20),
+        nullable=False
+    )
+    # Values: CASH, CHEQUE, RTGS, NEFT, NET_BANKING
 
-    # relationships
-    seller = db.relationship("Seller")
-    product = db.relationship("Product")
+    # ✅ NEW — FLEXIBLE DETAILS STORAGE
+    payment_details = db.Column(
+        db.JSON,
+        nullable=True
+    )
+    """
+    Example structures:
+
+    CASH:
+    {}
+
+    CHEQUE:
+    {
+        "date": "2026-04-14",
+        "cheque_no": "123456",
+        "cheque_name": "ABC Pvt Ltd",
+        "bank_name": "HDFC Bank",
+        "account_number": "XXXXXX"
+    }
+
+    RTGS / NEFT:
+    {
+        "date": "2026-04-14",
+        "sender_bank": "ICICI",
+        "sender_account": "XXXX",
+        "sender_name": "John",
+        "ref_no": "UTR123456",
+        "receiver_bank": "HDFC",
+        "receiver_account": "XXXX",
+        "receiver_name": "Seller Name",
+        "ifsc": "HDFC0001234"
+    }
+
+    NET BANKING:
+    {
+        "date": "2026-04-14",
+        "sender_bank": "SBI",
+        "sender_account": "XXXX",
+        "sender_name": "John",
+        "receiver_bank": "HDFC",
+        "receiver_account": "XXXX",
+        "receiver_name": "Seller",
+        "sender_upi": "abc@upi",
+        "receiver_upi": "xyz@upi"
+    }
+    """
+
+    # =========================================
+    # AUDIT
+    # =========================================
+
+    created_at = db.Column(
+        db.DateTime,
+        default=datetime.utcnow
+    )
+
+    # =========================================
+    # RELATIONSHIPS
+    # =========================================
+
+    seller = db.relationship("Seller", lazy=True)
+    product = db.relationship("Product", lazy=True)
+
+    # =========================================
+    # HELPER METHOD (VERY USEFUL)
+    # =========================================
+
+    def to_dict(self):
+        return {
+            "id": self.id,
+            "seller_id": self.seller_id,
+            "product_id": self.product_id,
+            "from_date": self.from_date.isoformat() if self.from_date else None,
+            "to_date": self.to_date.isoformat() if self.to_date else None,
+            "paid_amount": self.paid_amount,
+            "payment_mode": self.payment_mode,
+            "payment_details": self.payment_details,
+            "created_at": self.created_at.isoformat() if self.created_at else None
+        }
+
+    # =========================================
+    # DEBUG FRIENDLY
+    # =========================================
+
+    def __repr__(self):
+        return f"<SellerPayment {self.id} | Seller {self.seller_id} | ₹{self.paid_amount} | {self.payment_mode}>"
     
 class SellerInventory(db.Model):
 
