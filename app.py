@@ -8736,6 +8736,179 @@ def create_app():
                 "error": "Failed to send request",
                 "details": str(e)
             }), 500
+            
+    from sqlalchemy.orm import joinedload
+
+    @app.route('/api/admin/live-tracking', methods=['GET'])
+    @jwt_required()
+    @role_required(UserRole.SUPER_ADMIN)
+    def admin_live_tracking():
+
+        data = []
+
+        # ===============================
+        # 1️⃣ SCHOOL → SELLER
+        # ===============================
+        school_requests = db.session.query(
+            SchoolStockRequest.id,
+            SchoolStockRequest.status,
+            SchoolStockRequest.quantity,
+            SchoolStockRequest.created_at,
+            School.name.label("school_name"),
+            Seller.name.label("seller_name"),
+            Product.name.label("product_name")
+        ).outerjoin(School, School.id == SchoolStockRequest.school_id)\
+        .outerjoin(Seller, Seller.id == SchoolStockRequest.seller_id)\
+        .outerjoin(Product, Product.id == SchoolStockRequest.product_id)\
+        .filter(
+            SchoolStockRequest.status.in_(["PENDING", "APPROVED", "SHIPPED"])
+        ).order_by(SchoolStockRequest.created_at.desc()).limit(10).all()
+
+        for r in school_requests:
+            data.append({
+                "id": f"SR-{r.id}",
+                "flow": "School → Seller",
+                "stage": r.status,
+                "from": r.school.name if r.school else "N/A",
+                "to": r.seller.name if r.seller else "N/A",
+                "product": r.product.name if r.product else "N/A",
+                "quantity": r.quantity,
+                "created_at": r.created_at.isoformat()
+            })
+
+        # ===============================
+        # 2️⃣ SELLER → SCHOOL
+        # ===============================
+        dispatches = AdminDispatchInstruction.query.options(
+            joinedload(AdminDispatchInstruction.seller),
+            joinedload(AdminDispatchInstruction.school),
+            joinedload(AdminDispatchInstruction.product)
+        ).filter(
+            AdminDispatchInstruction.status.in_(["PENDING", "REQUESTED"])
+        ).order_by(AdminDispatchInstruction.created_at.desc()).limit(10).all()
+
+        for d in dispatches:
+            data.append({
+                "id": f"AD-{d.id}",
+                "flow": "Seller → School",
+                "stage": d.status,
+                "from": d.seller.name if d.seller else "N/A",
+                "to": d.school.name if d.school else "N/A",
+                "product": d.product.name if d.product else "N/A",
+                "quantity": d.quantity,
+                "created_at": d.created_at.isoformat()
+            })
+
+        # ===============================
+        # 3️⃣ SHIPMENTS
+        # ===============================
+        shipments = Shipment.query.options(
+            joinedload(Shipment.from_seller),
+            joinedload(Shipment.to_school)
+        ).filter(
+            Shipment.status != ShipmentStatus.DELIVERED
+        ).order_by(Shipment.created_at.desc()).limit(10).all()
+
+        for s in shipments:
+            data.append({
+                "id": f"SH-{s.id}",
+                "flow": "Seller → School",
+                "stage": s.status.name,
+                "from": s.from_seller.name if s.from_seller else "N/A",
+                "to": s.to_school.name if s.to_school else "N/A",
+                "created_at": s.created_at.isoformat()
+            })
+
+        # ===============================
+        # SORT FINAL DATA
+        # ===============================
+        data.sort(key=lambda x: x["created_at"], reverse=True)
+
+        return jsonify({"data": data}), 200
+    
+    @app.route('/api/admin/active-requests', methods=['GET'])
+    @jwt_required()
+    @role_required(UserRole.SUPER_ADMIN)
+    def admin_active_requests():
+
+        try:
+            # ✅ First image subquery (same as before)
+            first_image_subquery = db.session.query(
+                ProductImage.product_id,
+                ProductImage.image_url
+            ).filter(
+                ProductImage.display_order == 1
+            ).subquery()
+
+            requests = db.session.query(
+                SchoolStockRequest.id,
+                SchoolStockRequest.status,
+                SchoolStockRequest.quantity,
+                SchoolStockRequest.created_at,
+                SchoolStockRequest.request_type,
+
+                Seller.name.label("seller_name"),
+                School.name.label("school_name"),
+
+                Product.name.label("product_name"),
+                first_image_subquery.c.image_url.label("product_image"),
+
+                ProductSize.size.label("size")   # ✅ SIZE
+            )\
+            .join(Seller, Seller.id == SchoolStockRequest.seller_id)\
+            .join(School, School.id == SchoolStockRequest.school_id)\
+            .join(Product, Product.id == SchoolStockRequest.product_id)\
+            .outerjoin(ProductSize, ProductSize.id == SchoolStockRequest.size_id)\
+            .outerjoin(
+                first_image_subquery,
+                first_image_subquery.c.product_id == Product.id
+            )\
+            .filter(
+                SchoolStockRequest.status.in_(["PENDING", "APPROVED", "SHIPPED"])
+            )\
+            .order_by(SchoolStockRequest.created_at.desc())\
+            .all()
+
+            data = []
+
+            for r in requests:
+
+                # ✅ HANDLE BOTH DIRECTIONS
+                if r.request_type == "SCHOOL_TO_SELLER":
+                    from_entity = r.school_name
+                    to_entity = r.seller_name
+                    direction = "SCHOOL → SELLER"
+                else:
+                    from_entity = r.seller_name
+                    to_entity = r.school_name
+                    direction = "SELLER → SCHOOL"
+
+                data.append({
+                    "id": r.id,
+                    "status": r.status,
+                    "quantity": r.quantity,
+                    "created_at": r.created_at.isoformat(),
+
+                    # ✅ PRODUCT
+                    "product_name": r.product_name,
+                    "product_image": r.product_image if r.product_image else None,
+                    "size": r.size if r.size else None,
+
+                    # ✅ FLOW INFO
+                    "from": from_entity,
+                    "to": to_entity,
+                    "direction": direction,
+
+                    # ✅ RAW (optional but useful)
+                    "seller_name": r.seller_name,
+                    "school_name": r.school_name
+                })
+
+            return jsonify(data), 200
+
+        except Exception as e:
+            print("Active Requests Error:", str(e))
+            return jsonify({"error": "Failed to fetch active requests"}), 500
         
     @app.route("/api/school/my-stock-requests", methods=["GET"])
     @jwt_required()
