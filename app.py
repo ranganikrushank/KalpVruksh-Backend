@@ -9123,12 +9123,7 @@ def create_app():
 
             user = get_current_user()
 
-            req = (
-                db.session.query(SchoolStockRequest)
-                .filter_by(id=req_id)
-                .with_for_update()
-                .first()
-            )
+            req = db.session.get(SchoolStockRequest, req_id)
 
             if not req:
                 return jsonify({"error": "Request not found"}), 404
