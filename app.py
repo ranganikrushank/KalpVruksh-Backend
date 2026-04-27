@@ -9217,7 +9217,7 @@ def create_app():
             print("Receive error:", str(e))
 
             return jsonify({
-                "error": "Failed to receive stock"
+                "error": "Receive stock : Refresh to Check"
             }), 500
 
     @app.route("/api/seller/reject-request/<int:req_id>", methods=["POST"])
