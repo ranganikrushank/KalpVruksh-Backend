@@ -9159,13 +9159,16 @@ def create_app():
             ).first()
 
             if seller_inventory:
-                seller_inventory.quantity += req.quantity
+                seller_inventory.remaining_stock += req.quantity
+                seller_inventory.total_allocated += req.quantity
             else:
                 seller_inventory = SellerInventory(
                     seller_id=req.seller_id,
                     product_id=req.product_id,
                     size_id=size_id,
-                    quantity=req.quantity
+                    total_allocated=req.quantity,
+                    remaining_stock=req.quantity,
+                    sent_stock=0
                 )
                 db.session.add(seller_inventory)
 
