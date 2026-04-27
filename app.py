@@ -9131,8 +9131,16 @@ def create_app():
             if req.seller_id != user.seller_id:
                 return jsonify({"error": "Unauthorized"}), 403
 
-            if req.status != "SHIPPED" or req.request_type != "SELLER_TO_SCHOOL":
-                return jsonify({"error": "Invalid request type or not shipped"}), 400
+            # 🔒 STRICT VALIDATION (PREVENT DOUBLE RECEIVE)
+
+            if req.request_type != "SELLER_TO_SCHOOL":
+                return jsonify({"error": "Invalid request type"}), 400
+
+            if req.status == "RECEIVED":
+                return jsonify({"error": "Already received"}), 400
+
+            if req.status != "SHIPPED":
+                return jsonify({"error": "Stock not shipped yet"}), 400
 
 
             size_id = req.size_id
