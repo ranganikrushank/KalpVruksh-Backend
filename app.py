@@ -9429,30 +9429,30 @@ def create_app():
             latest_map = {}
 
             for r in seller_requests:
-    key = f"{r.product_id}_{r.size_id or 'nosize'}_{r.school_id}"
+                key = f"{r.product_id}_{r.size_id or 'nosize'}_{r.school_id}"
 
-    # keep only latest request (first occurrence due to DESC order)
-    if key in latest_map:
-        continue
+                # keep only latest request (first occurrence due to DESC order)
+                if key in latest_map:
+                    continue
 
-    latest_map[key] = True
+                latest_map[key] = True
 
-    data.append({
-        "request_id": r.id,
-        "product_id": r.product_id,
-        "size_id": r.size_id,
-        "school_id": r.school_id,
-        "product_name": r.product.name if r.product else "Unknown",
-        "product_images": [
-            img.image_url for img in r.product.images
-        ] if r.product and r.product.images else [],
-        "size": r.size.size if r.size else "Standard",
-        "school_name": r.school.name if r.school else "Unknown",
-        "quantity": r.quantity,
-        "status": r.status,
-        "request_type": r.request_type,
-        "created_at": r.created_at.isoformat() if r.created_at else None
-    })
+                data.append({
+                    "request_id": r.id,
+                    "product_id": r.product_id,
+                    "size_id": r.size_id,
+                    "school_id": r.school_id,
+                    "product_name": r.product.name if r.product else "Unknown",
+                    "product_images": [
+                        img.image_url for img in r.product.images
+                    ] if r.product and r.product.images else [],
+                    "size": r.size.size if r.size else "Standard",
+                    "school_name": r.school.name if r.school else "Unknown",
+                    "quantity": r.quantity,
+                    "status": r.status,
+                    "request_type": r.request_type,
+                    "created_at": r.created_at.isoformat() if r.created_at else None
+                })
 
             return jsonify(data), 200
 
