@@ -9149,11 +9149,27 @@ def create_app():
 
 
             # ===============================
-            # 🚫 REMOVED STOCK LOGIC
+            # ✅ ADD STOCK TO SCHOOL (FINAL DELIVERY)
             # ===============================
-            # ❌ seller inventory updates removed
-            # ❌ school inventory updates removed
-            # ❌ ledger entry removed
+
+            school_inventory = SchoolInventory.query.filter_by(
+                school_id=req.school_id,
+                product_id=req.product_id,
+                size_id=size_id
+            ).first()
+
+            if school_inventory:
+                school_inventory.quantity += req.quantity
+                school_inventory.total_received += req.quantity
+            else:
+                school_inventory = SchoolInventory(
+                    school_id=req.school_id,
+                    product_id=req.product_id,
+                    size_id=size_id,
+                    quantity=req.quantity,
+                    total_received=req.quantity
+                )
+                db.session.add(school_inventory)
 
 
             # ===============================
@@ -9476,7 +9492,7 @@ def create_app():
     
     @app.route("/api/school/mark-shipped/<int:req_id>", methods=["POST"])
     @jwt_required()
-    @role_required(UserRole.SELLER)
+    @role_required(UserRole.SCHOOL)
     def mark_shipped(req_id):
 
         try:
@@ -9513,33 +9529,33 @@ def create_app():
             seller_inventory.remaining_stock -= req.quantity
             seller_inventory.sent_stock += req.quantity
 
-            # ----------------------------------------
-            # ADD STOCK TO SCHOOL
-            # ----------------------------------------
+            # # ----------------------------------------
+            # # ADD STOCK TO SCHOOL
+            # # ----------------------------------------
 
-            school_inventory = SchoolInventory.query.filter_by(
-                school_id=req.school_id,
-                product_id=req.product_id,
-                size_id=req.size_id
-            ).first()
+            # school_inventory = SchoolInventory.query.filter_by(
+            #     school_id=req.school_id,
+            #     product_id=req.product_id,
+            #     size_id=req.size_id
+            # ).first()
 
-            if school_inventory:
+            # if school_inventory:
 
-                school_inventory.quantity += req.quantity
-                school_inventory.total_received += req.quantity
+            #     school_inventory.quantity += req.quantity
+            #     school_inventory.total_received += req.quantity
 
-            else:
+            # else:
 
-                school_inventory = SchoolInventory(
-                    school_id=req.school_id,
-                    product_id=req.product_id,
-                    size_id=req.size_id,
-                    quantity=req.quantity,
-                    total_received=req.quantity,
-                    category=CategoryType.STUDENT
-                )
+            #     school_inventory = SchoolInventory(
+            #         school_id=req.school_id,
+            #         product_id=req.product_id,
+            #         size_id=req.size_id,
+            #         quantity=req.quantity,
+            #         total_received=req.quantity,
+            #         category=CategoryType.STUDENT
+            #     )
 
-                db.session.add(school_inventory)
+            #     db.session.add(school_inventory)
 
             # ----------------------------------------
             # UPDATE REQUEST
