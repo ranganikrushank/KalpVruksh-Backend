@@ -8930,7 +8930,8 @@ def create_app():
                 "product_id": r.product_id,
                 "size_id": r.size_id,
                 "quantity": r.quantity,
-                "status": r.status
+                "status": r.status,
+                "request_type": r.request_type
             })
 
         return jsonify(result), 200
@@ -9425,6 +9426,7 @@ def create_app():
                     "school_name": r.school.name if r.school else "Unknown",
                     "quantity": r.quantity,
                     "status": r.status,
+                    "request_type": r.request_type,
                     "created_at": r.created_at.isoformat() if r.created_at else None
                 })
 
