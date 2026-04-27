@@ -5080,8 +5080,67 @@ def create_app():
                     "description": desc,
                     "created_at": created_at
                 })
+                
+            # ==================================================
+            # ✅ AFTER LOOP (THIS IS THE CORRECT PLACE)
+            # ==================================================
 
-            return jsonify(result), 200
+            distribution = {}
+
+            # SELLER STOCK
+            seller_inventory = SellerInventory.query.all()
+
+            for inv in seller_inventory:
+                product = Product.query.get(inv.product_id)
+                size = ProductSize.query.get(inv.size_id)
+
+                product_name = product.name if product else "Product"
+                size_name = size.size if size else "NA"
+
+                key = f"{product_name}__{size_name}"
+
+                if key not in distribution:
+                    distribution[key] = {
+                        "seller_stock": 0,
+                        "schools": []
+                    }
+
+                distribution[key]["seller_stock"] += inv.remaining_stock
+
+
+            # SCHOOL STOCK
+            school_inventory = SchoolInventory.query.all()
+
+            for inv in school_inventory:
+                product = Product.query.get(inv.product_id)
+                size = ProductSize.query.get(inv.size_id)
+                school = School.query.get(inv.school_id)
+
+                product_name = product.name if product else "Product"
+                size_name = size.size if size else "NA"
+
+                key = f"{product_name}__{size_name}"
+
+                if key not in distribution:
+                    distribution[key] = {
+                        "seller_stock": 0,
+                        "schools": []
+                    }
+
+                distribution[key]["schools"].append({
+                    "school_name": school.name if school else "Unknown",
+                    "quantity": inv.quantity
+                })
+
+
+            # ==================================================
+            # ✅ FINAL RETURN (ONLY ONCE)
+            # ==================================================
+
+            return jsonify({
+                "ledger": result,
+                "distribution": distribution
+            }), 200
 
         except Exception as e:
             print("LEDGER ERROR:", str(e))
