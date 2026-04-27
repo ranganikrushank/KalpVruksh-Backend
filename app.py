@@ -9401,8 +9401,7 @@ def create_app():
             seller_requests = (
                 SchoolStockRequest.query
                 .filter(
-                    SchoolStockRequest.seller_id == user.seller_id,
-                    SchoolStockRequest.request_type == "SELLER_TO_SCHOOL"
+                    SchoolStockRequest.seller_id == user.seller_id
                 )
                 .order_by(SchoolStockRequest.created_at.desc())
                 .all()
