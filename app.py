@@ -9149,22 +9149,6 @@ def create_app():
 
 
             # ===============================
-            # 🔻 DEDUCT FROM SCHOOL
-            # ===============================
-
-            school_inventory = SchoolInventory.query.filter_by(
-                school_id=req.school_id,
-                product_id=req.product_id,
-                size_id=size_id
-            ).first()
-
-            if not school_inventory or school_inventory.quantity < req.quantity:
-                return jsonify({"error": "Insufficient school stock"}), 400
-
-            school_inventory.quantity -= req.quantity
-
-
-            # ===============================
             # 🔺 ADD TO SELLER
             # ===============================
 
