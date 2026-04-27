@@ -9130,6 +9130,30 @@ def create_app():
 
             if req.seller_id != user.seller_id:
                 return jsonify({"error": "Unauthorized"}), 403
+            
+            if req.request_type != "SELLER_TO_SCHOOL":
+                return jsonify({"error": "Invalid request type"}), 400
+
+
+            updated = (
+                db.session.query(SchoolStockRequest)
+                .filter(
+                    SchoolStockRequest.id == req_id,
+                    SchoolStockRequest.status == "SHIPPED",
+                    SchoolStockRequest.request_type == "SELLER_TO_SCHOOL"
+                )
+                .update({
+                    "status": "RECEIVED",
+                    "received_at": datetime.now(timezone.utc)
+                }, synchronize_session=False)
+            )
+
+            if updated == 0:
+                db.session.rollback()
+                return jsonify({"error": "Already received"}), 400
+
+            # 🔥 COMMIT IMMEDIATELY
+            db.session.commit()
 
             if req.status != "SHIPPED" or req.request_type != "SELLER_TO_SCHOOL":
                 return jsonify({"error": "Invalid request type or not shipped"}), 400
