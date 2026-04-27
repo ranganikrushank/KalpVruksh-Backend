@@ -9123,7 +9123,12 @@ def create_app():
 
             user = get_current_user()
 
-            req = db.session.get(SchoolStockRequest, req_id)
+            req = (
+                db.session.query(SchoolStockRequest)
+                .filter_by(id=req_id)
+                .with_for_update()
+                .first()
+            )
 
             if not req:
                 return jsonify({"error": "Request not found"}), 404
@@ -9135,12 +9140,6 @@ def create_app():
 
             if req.request_type != "SELLER_TO_SCHOOL":
                 return jsonify({"error": "Invalid request type"}), 400
-
-            if req.status == "RECEIVED":
-                return jsonify({"error": "Already received"}), 400
-
-            if req.status != "SHIPPED":
-                return jsonify({"error": "Stock not shipped yet"}), 400
 
 
             size_id = req.size_id
