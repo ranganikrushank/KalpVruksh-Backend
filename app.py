@@ -9419,7 +9419,8 @@ def create_app():
                 SchoolStockRequest.query
                 .filter(
                     SchoolStockRequest.seller_id == user.seller_id,
-                    SchoolStockRequest.request_type == "SCHOOL_TO_SELLER"
+                    SchoolStockRequest.request_type == "SCHOOL_TO_SELLER",
+                    SchoolStockRequest.status.in_(["SHIPPED", "RECEIVED"])  # ✅ ADD THIS ONLY
                 )
                 .order_by(SchoolStockRequest.id.desc())  # ✅ change ONLY this line
                 .all()
