@@ -5,7 +5,8 @@ flask_cors
 gunicorn
 razorpay
 psycopg2-binary
+psycopg[binary]
 cloudinary
-dotenv
+python-dotenv
 reportlab
 sqlalchemy-libsql
