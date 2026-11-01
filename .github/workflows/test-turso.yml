@@ -6,25 +6,46 @@ on:
 
 jobs:
   test-turso:
-    name: Test Turso Database
+    name: Test Turso Database and Flask Models
     runs-on: ubuntu-latest
 
     steps:
+      # Step 1: Checkout repository
       - name: Checkout Repository
         uses: actions/checkout@v4
 
+      # Step 2: Setup Python
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
+      # Step 3: Install dependencies
       - name: Install Dependencies
         run: |
           python -m pip install --upgrade pip
-          pip install sqlalchemy sqlalchemy-libsql
+          pip install -r requirements.txt
 
+      # Step 4: Test direct Turso connection
       - name: Test Turso Connection
         env:
           TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
           TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
         run: python test_turso.py
+
+      # Step 5: Test Flask-SQLAlchemy models
+      - name: Test Flask Models
+        env:
+          DATABASE_BACKEND: turso
+          TURSO_DATABASE_URL: ${{ secrets.TURSO_DATABASE_URL }}
+          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+          SECRET_KEY: test-only-github-actions-secret
+          JWT_SECRET_KEY: test-only-github-actions-jwt-secret
+        run: python test_turso_models.py
+
+      # Step 6: Confirmation
+      - name: All Tests Completed
+        run: |
+          echo "Turso connection test passed."
+          echo "Flask SQLAlchemy model test passed."
+          echo "All Turso tests completed successfully."
