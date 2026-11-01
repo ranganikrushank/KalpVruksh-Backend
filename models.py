@@ -216,7 +216,7 @@ class Product(db.Model):
 # ================= INVENTORY =================
 
 from datetime import datetime
-from models import db
+# from models import db
 
 
 class SellerPayment(db.Model):
@@ -968,7 +968,7 @@ class SellerSchoolProduct(db.Model):
     
 # ================= INVENTORY LEDGER =================
 from datetime import datetime, timezone
-from models import db, CategoryType
+# from models import db, CategoryType
 
 
 class InventoryLedger(db.Model):

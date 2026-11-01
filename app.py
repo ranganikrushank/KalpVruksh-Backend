@@ -240,165 +240,225 @@ def create_app():
         
     from sqlalchemy import text
 
-    @app.route('/fix-db', methods=['GET'])
-    def fix_db():
-        try:
+    # @app.route('/fix-db', methods=['GET'])
+    # def fix_db():
+    #     try:
 
-            queries = [
+    #         queries = [
+    #             """
+    #             UPDATE inventory_ledger
+    #             SET category = UPPER(category)
+    #             WHERE category IS NOT NULL;
+    #             """,
 
-                # ====================================
-                # 🔥 STEP 1: FIX EXISTING DATA
-                # ====================================
+    #             """
+    #             UPDATE inventory_ledger
+    #             SET transaction_type = 'CREDIT'
+    #             WHERE transaction_type IS NULL;
+    #             """,
 
-                """
-                UPDATE inventory_ledger
-                SET category = UPPER(category)
-                WHERE category IS NOT NULL;
-                """,
+    #             """
+    #             UPDATE inventory_ledger
+    #             SET quantity = ABS(quantity)
+    #             WHERE quantity IS NOT NULL;
+    #             """,
 
-                """
-                UPDATE inventory_ledger
-                SET transaction_type = 'CREDIT'
-                WHERE transaction_type IS NULL;
-                """,
+    #             """
+    #             UPDATE inventory_ledger
+    #             SET category = 'STUDENT'
+    #             WHERE category IS NULL;
+    #             """,
 
-                """
-                UPDATE inventory_ledger
-                SET quantity = ABS(quantity)
-                WHERE quantity IS NOT NULL;
-                """,
+    #             # ====================================
+    #             # 🔥 STEP 2: INVENTORY LEDGER STRUCTURE
+    #             # ====================================
 
-                """
-                UPDATE inventory_ledger
-                SET category = 'STUDENT'
-                WHERE category IS NULL;
-                """,
+    #             """
+    #             ALTER TABLE inventory_ledger
+    #             ALTER COLUMN transaction_type TYPE VARCHAR(50);
+    #             """,
 
-                # ====================================
-                # 🔥 STEP 2: INVENTORY LEDGER STRUCTURE
-                # ====================================
+    #             """
+    #             ALTER TABLE inventory_ledger
+    #             ALTER COLUMN reference_type TYPE VARCHAR(50);
+    #             """,
 
-                """
-                ALTER TABLE inventory_ledger
-                ALTER COLUMN transaction_type TYPE VARCHAR(50);
-                """,
+    #             """
+    #             ALTER TABLE inventory_ledger
+    #             ADD COLUMN IF NOT EXISTS transaction_type VARCHAR(50);
+    #             """,
 
-                """
-                ALTER TABLE inventory_ledger
-                ALTER COLUMN reference_type TYPE VARCHAR(50);
-                """,
+    #             """
+    #             ALTER TABLE inventory_ledger
+    #             ADD COLUMN IF NOT EXISTS description VARCHAR(255);
+    #             """,
 
-                """
-                ALTER TABLE inventory_ledger
-                ADD COLUMN IF NOT EXISTS transaction_type VARCHAR(50);
-                """,
+    #             # SAFE CATEGORY COLUMN
+    #             """
+    #             DO $$ 
+    #             BEGIN
+    #                 IF NOT EXISTS (
+    #                     SELECT 1 FROM information_schema.columns 
+    #                     WHERE table_name='inventory_ledger' AND column_name='category'
+    #                 ) THEN
+    #                     ALTER TABLE inventory_ledger
+    #                     ADD COLUMN category VARCHAR(20);
+    #                 END IF;
+    #             END$$;
+    #             """,
 
-                """
-                ALTER TABLE inventory_ledger
-                ADD COLUMN IF NOT EXISTS description VARCHAR(255);
-                """,
+    #             # DEFAULT
+    #             """
+    #             ALTER TABLE inventory_ledger
+    #             ALTER COLUMN transaction_type SET DEFAULT 'CREDIT';
+    #             """,
 
-                # SAFE CATEGORY COLUMN
-                """
-                DO $$ 
-                BEGIN
-                    IF NOT EXISTS (
-                        SELECT 1 FROM information_schema.columns 
-                        WHERE table_name='inventory_ledger' AND column_name='category'
-                    ) THEN
-                        ALTER TABLE inventory_ledger
-                        ADD COLUMN category VARCHAR(20);
-                    END IF;
-                END$$;
-                """,
+    #             # ====================================
+    #             # 🚀 STEP 3: SELLER PAYMENT UPGRADE (IMPORTANT)
+    #             # ====================================
 
-                # DEFAULT
-                """
-                ALTER TABLE inventory_ledger
-                ALTER COLUMN transaction_type SET DEFAULT 'CREDIT';
-                """,
+    #             # ✅ Add payment_mode
+    #             """
+    #             ALTER TABLE seller_payments
+    #             ADD COLUMN IF NOT EXISTS payment_mode VARCHAR(20) DEFAULT 'CASH';
+    #             """,
 
-                # ====================================
-                # 🚀 STEP 3: SELLER PAYMENT UPGRADE (IMPORTANT)
-                # ====================================
+    #             # ✅ Add payment_details JSON
+    #             """
+    #             ALTER TABLE seller_payments
+    #             ADD COLUMN IF NOT EXISTS payment_details JSON;
+    #             """,
 
-                # ✅ Add payment_mode
-                """
-                ALTER TABLE seller_payments
-                ADD COLUMN IF NOT EXISTS payment_mode VARCHAR(20) DEFAULT 'CASH';
-                """,
+    #             # ✅ Fix old NULL modes
+    #             """
+    #             UPDATE seller_payments
+    #             SET payment_mode = 'CASH'
+    #             WHERE payment_mode IS NULL;
+    #             """,
 
-                # ✅ Add payment_details JSON
-                """
-                ALTER TABLE seller_payments
-                ADD COLUMN IF NOT EXISTS payment_details JSON;
-                """,
+    #             # ====================================
+    #             # 🚀 STEP 4: INDEXES (PERFORMANCE BOOST)
+    #             # ====================================
 
-                # ✅ Fix old NULL modes
-                """
-                UPDATE seller_payments
-                SET payment_mode = 'CASH'
-                WHERE payment_mode IS NULL;
-                """,
+    #             """
+    #             CREATE INDEX IF NOT EXISTS idx_ledger_seller
+    #             ON inventory_ledger (seller_id);
+    #             """,
 
-                # ====================================
-                # 🚀 STEP 4: INDEXES (PERFORMANCE BOOST)
-                # ====================================
+    #             """
+    #             CREATE INDEX IF NOT EXISTS idx_ledger_school
+    #             ON inventory_ledger (school_id);
+    #             """,
 
-                """
-                CREATE INDEX IF NOT EXISTS idx_ledger_seller
-                ON inventory_ledger (seller_id);
-                """,
+    #             """
+    #             CREATE INDEX IF NOT EXISTS idx_ledger_created_at
+    #             ON inventory_ledger (created_at DESC);
+    #             """,
 
-                """
-                CREATE INDEX IF NOT EXISTS idx_ledger_school
-                ON inventory_ledger (school_id);
-                """,
+    #             """
+    #             CREATE INDEX IF NOT EXISTS idx_payment_seller
+    #             ON seller_payments (seller_id);
+    #             """,
 
-                """
-                CREATE INDEX IF NOT EXISTS idx_ledger_created_at
-                ON inventory_ledger (created_at DESC);
-                """,
+    #             """
+    #             CREATE INDEX IF NOT EXISTS idx_payment_mode
+    #             ON seller_payments (payment_mode);
+    #             """,
 
-                """
-                CREATE INDEX IF NOT EXISTS idx_payment_seller
-                ON seller_payments (seller_id);
-                """,
+    #             # ====================================
+    #             # 🚀 STEP 5: DATA SAFETY NORMALIZATION
+    #             # ====================================
 
-                """
-                CREATE INDEX IF NOT EXISTS idx_payment_mode
-                ON seller_payments (payment_mode);
-                """,
+    #             """
+    #             UPDATE seller_payments
+    #             SET payment_details = '{}'::json
+    #             WHERE payment_details IS NULL;
+    #             """,
 
-                # ====================================
-                # 🚀 STEP 5: DATA SAFETY NORMALIZATION
-                # ====================================
+    #         ]
 
-                """
-                UPDATE seller_payments
-                SET payment_details = '{}'::json
-                WHERE payment_details IS NULL;
-                """,
+    #         for q in queries:
+    #             db.session.execute(text(q))
 
-            ]
+    #         db.session.commit()
 
-            for q in queries:
-                db.session.execute(text(q))
+    #         return {
+    #             "success": True,
+    #             "message": "✅ DB fully upgraded (ledger + payments + indexes + cleanup)"
+    #         }
 
-            db.session.commit()
+    #     except Exception as e:
+    #         db.session.rollback()
+    #         return {
+    #             "success": False,
+    #             "error": str(e)
+    #         }
 
-            return {
-                "success": True,
-                "message": "✅ DB fully upgraded (ledger + payments + indexes + cleanup)"
-            }
+    # from sqlalchemy import text
 
-        except Exception as e:
-            db.session.rollback()
-            return {
-                "success": False,
-                "error": str(e)
-            }
-    
+    # @app.route('/reset-transactions', methods=['GET'])
+    # def reset_transactions():
+
+    #     try:
+
+    #         queries = [
+
+    #             "DELETE FROM shipment_items;",
+    #             "DELETE FROM shipments;",
+
+    #             "DELETE FROM order_items;",
+    #             "DELETE FROM orders;",
+
+    #             "DELETE FROM staff_order_items;",
+    #             "DELETE FROM staff_orders;",
+
+    #             "DELETE FROM inventory_ledger;",
+
+    #             "DELETE FROM admin_dispatch_instructions;",
+
+    #             "DELETE FROM school_stock_requests;",
+
+    #             "DELETE FROM seller_payments;",
+
+    #             "DELETE FROM audit_logs;"
+    #         ]
+
+    #         for q in queries:
+    #             db.session.execute(text(q))
+
+    #         db.session.execute(text("""
+    #             UPDATE schools
+    #             SET coin_balance = 0;
+    #         """))
+
+    #         db.session.execute(text("""
+    #             UPDATE school_inventory
+    #             SET quantity = 0;
+    #         """))
+
+    #         db.session.execute(text("""
+    #             UPDATE seller_inventory
+    #             SET total_allocated = 0,
+    #                 sent_stock = 0,
+    #                 remaining_stock = 0;
+    #         """))
+
+    #         db.session.commit()
+
+    #         return {
+    #             "success": True,
+    #             "message": "Database transactions cleared successfully."
+    #         }
+
+    #     except Exception as e:
+
+    #         db.session.rollback()
+
+    #         return {
+    #             "success": False,
+    #             "error": str(e)
+    #         }, 500
+
     # from sqlalchemy import text
 
     # @app.route('/reset-database', methods=['GET', 'POST'])
@@ -437,15 +497,15 @@ def create_app():
     #             "success": False,
     #             "error": str(e)
     #         }, 500
-    
+
     # @app.route("/check-db")
     # def check_db():
     #     from sqlalchemy import text
-        
+    
     #     result = db.session.execute(text(
     #         "SELECT table_name FROM information_schema.tables WHERE table_schema='public'"
     #     ))
-        
+    
     #     tables = [row[0] for row in result]
     #     return {"tables": tables}
     
@@ -3966,7 +4026,8 @@ def create_app():
     def get_school_orders(school_id):
 
         try:
-            from models import User, StaffOrder, StaffOrderItem, Product, ProductSize
+            from models import (Product, ProductSize, StaffOrder,
+                                StaffOrderItem, User)
 
             result = []
 
@@ -6365,13 +6426,13 @@ def create_app():
     def chart_monthly_sales():
         # Group by month (YYYY-MM)
         monthly_data = db.session.query(
-            db.func.date_trunc('month', Order.created_at).label('month'),
+            db.func.strftime('%Y-%m', Order.created_at).label('month'),
             db.func.sum(Order.total_amount).label('student_revenue'),
             db.func.count(Order.id).label('student_orders')
         ).filter(Order.status == 'completed').group_by('month').all()
 
         staff_monthly = db.session.query(
-            db.func.date_trunc('month', StaffOrder.created_at).label('month'),
+            db.func.strftime('%Y-%m', StaffOrder.created_at).label('month'),
             db.func.sum(StaffOrder.total_amount).label('staff_revenue'),
             db.func.count(StaffOrder.id).label('staff_orders')
         ).filter(StaffOrder.status == 'completed').group_by('month').all()
@@ -6379,7 +6440,7 @@ def create_app():
         # Merge
         result = {}
         for m in monthly_data:
-            key = m.month.strftime('%Y-%m')
+            key = m.month
             result[key] = {
                 'student_revenue': float(m.student_revenue or 0),
                 'student_orders': m.student_orders,
@@ -6387,7 +6448,7 @@ def create_app():
                 'staff_orders': 0
             }
         for m in staff_monthly:
-            key = m.month.strftime('%Y-%m')
+            key = m.month
             if key in result:
                 result[key]['staff_revenue'] = float(m.staff_revenue or 0)
                 result[key]['staff_orders'] = m.staff_orders
